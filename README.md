@@ -2,9 +2,10 @@
 
 App simples, feito pra celular, para um grupo de amigos que aluga um espaço:
 
-- **Contas** (aluguel, água, luz e extras) divididas por igual. Um responsável paga a conta e o app controla quem já transferiu a parte dele.
-- **Geladeira**: quem pegou cerveja de quem, quem pagou pra quem, e o saldo entre cada dupla (estilo Splitwise). Separado das contas.
-- **Galera**: cadastro dos integrantes (nome + PIN de 4 dígitos), link de convite.
+- **Início**: dashboard "quem deve pra quem" — um valor por dupla (contas + geladeira, já compensados), com a chave Pix de quem recebe, o detalhamento do que compõe o valor e o botão **Paguei tudo** (com comprovante opcional).
+- **Contas** (aluguel, água, luz e extras) divididas por igual. Um **responsável fixo** recebe as contas do espaço; o app controla quem já transferiu a parte dele, com comprovante.
+- **Geladeira**: quem pegou cerveja de quem, quem pagou pra quem, e o saldo entre cada dupla (estilo Splitwise).
+- **Galera**: integrantes (nome + PIN de 4 dígitos + chave Pix), responsável pelas contas, link de convite.
 - Funciona como PWA (dá pra "instalar" na tela inicial), atualiza em tempo real para todo mundo e continua abrindo sem internet (sincroniza depois).
 
 Sem servidor próprio: é uma página estática (HTML/CSS/JS puro, sem build) hospedada no GitHub Pages, com os dados no **Firebase Firestore** (plano gratuito).
@@ -51,19 +52,34 @@ Qualquer outro host estático serve (Netlify, Cloudflare Pages, Vercel…): é s
 2. Na aba **Galera**, copie o **link de convite** e mande no grupo do WhatsApp. Quem abrir entra direto no grupo e se cadastra.
 3. No celular: Chrome (Android) → menu ⋮ → **Instalar app** / **Adicionar à tela inicial**. Safari (iPhone) → Compartilhar → **Adicionar à Tela de Início**.
 
+### Início (dashboard)
+- Cada cartão é uma dupla: "Você deve pra X" (vermelho) ou "X te deve" (verde), com o valor **líquido** — partes de contas pendentes somadas ao saldo da geladeira, compensando os dois sentidos.
+- **O que compõe esse valor** abre a lista: cada parte de conta (com botões *Paguei/Recebi* e 📎 anexar comprovante) e a linha "Saldo da geladeira" (com sinal negativo quando abate).
+- **Paguei tudo / Recebi tudo** zera a dupla: marca todas as partes como pagas e lança o acerto da geladeira; dá pra anexar um único comprovante.
+- "Entre os outros" mostra as duplas que não envolvem você.
+
 ### Contas
+- Na aba **Galera**, defina o **responsável pelas contas** (toque no integrante → *Tornar responsável*). Toda conta nova já vem com ele em "quem pagou"; dá pra trocar caso a caso (ex.: um extra que outra pessoa pagou).
 - **+ Nova conta**: categoria, mês, valor total, quem pagou, entre quem dividir. A divisão é igual; centavos que sobram vão pra quem não pagou a conta.
-- Toque na conta para ver quem já pagou e marcar pagamentos (qualquer integrante pode marcar; fica registrado quem marcou e quando).
+- Toque na conta para ver quem já pagou, a chave Pix de quem recebe, marcar pagamentos e anexar/ver comprovantes (qualquer integrante pode marcar; fica registrado quem marcou e quando).
 - **Repetir em [próximo mês]** copia a conta para o mês seguinte com todo mundo pendente.
 
 ### Geladeira
 - **Pegou algo**: "Kaique pegou de Pedro R$ 12" → Kaique passa a dever Pedro.
-- **Pagou alguém**: "Kaique pagou pra Pedro R$ 7" → abate a dívida (ou cria crédito).
+- **Pagou alguém**: "Kaique pagou pra Pedro R$ 7" → abate a dívida (ou cria crédito). Aceita comprovante.
 - O saldo mostrado é sempre o líquido entre cada dupla. **Acertar** já abre o lançamento com o valor exato.
+
+### Pix
+- Cada um cadastra a própria chave (no cadastro ou em Galera → seu nome → *Minha chave Pix*). Quem te dever vê a chave com botão **Copiar** no dashboard, no detalhe da conta e na geladeira.
+
+### Comprovantes
+- Foto, print ou PDF. A imagem é reduzida no próprio celular (máx. 1280 px, JPEG) e fica guardada **dentro do Firestore** — não usa o Firebase Storage, que hoje exige cartão de crédito (plano Blaze). Um comprovante típico ocupa 50–150 KB; a cota gratuita (1 GB) dá pra milhares.
+- PDF só até 600 KB (comprovantes de banco costumam ter 30–100 KB); maior que isso, tire um print.
+- Desmarcar um pagamento apaga o comprovante dele; excluir uma conta ou lançamento apaga os comprovantes ligados.
 
 ### PIN
 - O PIN só evita que alguém marque algo como outra pessoa sem querer; não é segurança de verdade (quem tem o link do grupo vê tudo).
-- Esqueceu? Qualquer integrante pode redefinir o PIN de outro pelo botão 🔑 na aba Galera.
+- Esqueceu? Qualquer integrante pode redefinir o PIN de outro: Galera → toque no nome → *Redefinir PIN*.
 
 ## Desenvolvimento local
 
@@ -78,13 +94,14 @@ python dev/serve.py 8790
 ## Estrutura dos dados (Firestore)
 
 ```
-groups/{gid}                 { name, createdAt }
-groups/{gid}/members/{mid}   { name, pinHash, active, createdAt }
+groups/{gid}                 { name, treasurer (mid do responsável), createdAt }
+groups/{gid}/members/{mid}   { name, pinHash, pix, active, createdAt }
 groups/{gid}/bills/{bid}     { category, title, month "YYYY-MM", amount (centavos), paidBy,
-                               splitAmong: [mid], shares: { mid: { amount, paid, paidAt, markedBy } },
+                               splitAmong: [mid], shares: { mid: { amount, paid, paidAt, markedBy, receiptId } },
                                notes, createdBy, createdAt, updatedAt }
-groups/{gid}/fridge/{fid}    { kind "pegou"|"pagou", from, to, amount, description, createdBy, createdAt }
+groups/{gid}/fridge/{fid}    { kind "pegou"|"pagou", from, to, amount, description, receiptId, createdBy, createdAt }
                                (valor "fluiu" de from para to: to passa a dever from)
+groups/{gid}/receipts/{rid}  { dataUrl, mime, bytes, name, uploadedBy, createdAt }
 ```
 
 Valores sempre em **centavos** (inteiros). `pinHash` = SHA-256 de `gid:mid:pin`.

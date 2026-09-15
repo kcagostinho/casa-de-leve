@@ -359,3 +359,41 @@ details[open] summary::after { content: " ▾"; }
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 15px;
 }
+.avatar.big { width: 46px; height: 46px; font-size: 18px; }
+
+/* ---------- dashboard ---------- */
+.strip {
+  display: flex; gap: 10px; margin-bottom: 12px;
+}
+.strip-item {
+  flex: 1; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 14px; display: flex; flex-direction: column; gap: 2px; box-shadow: var(--shadow);
+}
+.strip-item b { font-size: 20px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.card.debt { border-left: 4px solid var(--border); }
+.card.debt-owe { border-left-color: var(--danger); }
+.card.debt-owed { border-left-color: var(--ok); }
+.card.debt .big-amount { font-size: 22px; }
+
+.pixline {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--card-2); border: 1px dashed var(--border); border-radius: 10px;
+  padding: 8px 10px; margin-top: 10px;
+}
+.pixline code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; }
+.pixline.none { border-style: solid; }
+
+details.items { margin-top: 10px; }
+details.items > summary { color: var(--accent); font-size: 14px; }
+details.items .row.item { flex-wrap: wrap; row-gap: 6px; }
+details.items .row.item.neg .amt { color: var(--muted); font-weight: 500; }
+details.items .row.item .amt { min-width: 84px; text-align: right; }
+.item-actions { display: flex; gap: 6px; flex-basis: 100%; justify-content: flex-end; }
+details.sub-items > summary { padding: 0; }
+details.sub-items > summary::after { content: none; }
+details.sub-items > summary .amt::after { content: " ▸"; color: var(--muted); font-weight: 400; }
+details.sub-items[open] > summary .amt::after { content: " ▾"; }
+details.sub-items .row.item { padding-left: 12px; }
+
+.receipt-img { display: block; max-width: 100%; border-radius: 12px; border: 1px solid var(--border); }
+button.link.small { font-size: 13px; padding: 0; font-weight: 600; }

@@ -69,6 +69,9 @@ export async function updateDoc(ref, patch) {
   }
   save(store);
 }
+export async function getDoc(ref) {
+  return docSnap(ref.path, load()[ref.path]);
+}
 export async function deleteDoc(ref) {
   const store = load();
   delete store[ref.path];
