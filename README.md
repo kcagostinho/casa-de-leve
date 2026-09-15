@@ -65,7 +65,7 @@ Qualquer outro host estático serve (Netlify, Cloudflare Pages, Vercel…): é s
 - **Repetir em [próximo mês]** copia a conta para o mês seguinte com todo mundo pendente.
 
 ### Geladeira
-- **Pegou**: "Pedro pegou 2× Heineken do Kaique" → Pedro passa a dever 2 Heineken ao Kaique. Item é texto livre com sugestões (chips e autocompletar dos itens já usados); "heineken" e "Heineken" contam como o mesmo item.
+- **Pegou**: "Pedro pegou 2× Heineken do Kaique" → Pedro passa a dever 2 Heineken ao Kaique. O item é texto livre; "heineken" e "Heineken" contam como o mesmo item.
 - **Devolveu**: "Pedro devolveu 2× Heineken pro Kaique" → abate. O botão **Devolvi** (ou **Devolveu**, pra quem recebe) já lança a quantidade exata.
 - O saldo é sempre por dupla e por item, líquido nos dois sentidos. Se alguém comprar bebida pro grupo todo, isso é uma conta **Extra** em Contas, não geladeira.
 

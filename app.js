@@ -451,7 +451,6 @@ function attachReceiptToShare(billId, mid, payload) {
 
 // --- geladeira (por item: "Pedro pegou 2× Heineken do Kaique")
 
-const DEFAULT_ITEMS = ["Heineken", "Brahma", "Skol", "Corona", "Coca-Cola", "Gelo", "Água"];
 const itemKeyOf = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
 
 function addFridgeEntry({ kind, from, to, item, qty, note }) {
@@ -464,19 +463,6 @@ function addFridgeEntry({ kind, from, to, item, qty, note }) {
     createdBy: state.mid,
     createdAt: Date.now(),
   });
-}
-
-/** Itens já usados no grupo (por frequência) + sugestões padrão. */
-function knownItems() {
-  const count = new Map(); // itemKey -> {label, n}
-  for (const e of state.fridge) {
-    const c = count.get(e.itemKey) || { label: e.item, n: 0 };
-    c.n++;
-    count.set(e.itemKey, c);
-  }
-  const used = [...count.entries()].sort((a, b) => b[1].n - a[1].n).map(([k]) => bestLabel(k));
-  const rest = DEFAULT_ITEMS.filter((d) => !count.has(itemKeyOf(d)));
-  return [...used, ...rest].slice(0, 12);
 }
 
 /**
@@ -1200,7 +1186,6 @@ function fridgeFormHtml(preset = {}) {
   const others = pool.filter((m) => m.id !== state.mid);
   const other = preset.other || others[0]?.id || "";
   const opts = (sel) => pool.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.name)}${m.id === state.mid ? " (você)" : ""}</option>`).join("");
-  const items = knownItems();
   return `
     <div class="sheet">
       <button class="close" data-action="dlg-close" aria-label="Fechar">✕</button>
@@ -1217,10 +1202,8 @@ function fridgeFormHtml(preset = {}) {
           <select name="b">${opts(other)}</select>
         </label>
         <label class="field"><span>O quê</span>
-          <input type="text" name="item" list="item-list" required maxlength="40" placeholder="Ex.: Heineken" value="${esc(preset.item || "")}" autocomplete="off">
-          <datalist id="item-list">${items.map((i) => `<option value="${esc(i)}">`).join("")}</datalist>
+          <input type="text" name="item" required maxlength="40" placeholder="Ex.: Heineken" value="${esc(preset.item || "")}" autocomplete="off">
         </label>
-        <div class="chips">${items.slice(0, 8).map((i) => `<button type="button" class="chip" data-action="pick-item" data-item="${esc(i)}">${esc(i)}</button>`).join("")}</div>
         <div class="field">
           <span class="field-label">Quantidade</span>
           <div class="stepper">
@@ -1500,11 +1483,6 @@ const actions = {
     const who = debtor === state.mid ? "Você devolveu" : `${nameOf(debtor)} devolveu`;
     if (!(await confirmDialog(`${who} ${qty}× ${item} pra ${nameOf(creditor)}? Isso zera esse item entre vocês.`, "Confirmar"))) return;
     write(() => addFridgeEntry({ kind: "devolveu", from: debtor, to: creditor, item, qty: Number(qty), note: "" }), `${qty}× ${item} devolvido`);
-  },
-  "pick-item": (el) => {
-    const input = field(el.closest("form"), "item");
-    input.value = el.dataset.item;
-    input.focus();
   },
   step: (el) => {
     const input = field(el.closest("form"), "qty");
