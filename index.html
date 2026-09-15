@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sede</title>
+  <meta name="description" content="Rateio das contas do espaço e controle da geladeira entre amigos.">
+  <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111110" media="(prefers-color-scheme: dark)">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Sede">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="offline" class="offline" hidden>Sem conexão — o que você fizer será sincronizado depois</div>
+
+  <main id="root">
+    <div class="center muted">Carregando…</div>
+  </main>
+
+  <nav id="tabbar" class="tabbar" hidden>
+    <button type="button" data-action="tab" data-tab="home"><span class="ico">🏠</span><span>Início</span></button>
+    <button type="button" data-action="tab" data-tab="bills"><span class="ico">🧾</span><span>Contas</span></button>
+    <button type="button" data-action="tab" data-tab="fridge"><span class="ico">🍺</span><span>Geladeira</span></button>
+    <button type="button" data-action="tab" data-tab="people"><span class="ico">👥</span><span>Galera</span></button>
+  </nav>
+
+  <dialog id="dlg"></dialog>
+  <dialog id="confirm" class="confirm">
+    <p id="confirm-text"></p>
+    <div class="actions">
+      <button type="button" class="btn btn-ghost" data-action="confirm-no">Cancelar</button>
+      <button type="button" class="btn btn-danger" data-action="confirm-yes">Confirmar</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

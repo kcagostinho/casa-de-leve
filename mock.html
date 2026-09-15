@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Sede (mock)</title>
+  <!-- Desenvolvimento: troca o SDK do Firebase por um mock em localStorage. Abra mock.html em vez de index.html. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js": "./dev/mock-firebase.js",
+      "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js": "./dev/mock-firebase.js",
+      "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js": "./dev/mock-firebase.js",
+      "./firebase-config.js": "./dev/mock-config.js"
+    }
+  }
+  </script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="offline" class="offline" hidden>Sem conexão — o que você fizer será sincronizado depois</div>
+
+  <main id="root">
+    <div class="center muted">Carregando…</div>
+  </main>
+
+  <nav id="tabbar" class="tabbar" hidden>
+    <button type="button" data-action="tab" data-tab="home"><span class="ico">🏠</span><span>Início</span></button>
+    <button type="button" data-action="tab" data-tab="bills"><span class="ico">🧾</span><span>Contas</span></button>
+    <button type="button" data-action="tab" data-tab="fridge"><span class="ico">🍺</span><span>Geladeira</span></button>
+    <button type="button" data-action="tab" data-tab="people"><span class="ico">👥</span><span>Galera</span></button>
+  </nav>
+
+  <dialog id="dlg"></dialog>
+  <dialog id="confirm" class="confirm">
+    <p id="confirm-text"></p>
+    <div class="actions">
+      <button type="button" class="btn btn-ghost" data-action="confirm-no">Cancelar</button>
+      <button type="button" class="btn btn-danger" data-action="confirm-yes">Confirmar</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

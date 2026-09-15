@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Só quem tem o id do grupo (o link de convite) chega até aqui.
+    // A coleção "groups" não pode ser listada, então não dá pra descobrir ids.
+    match /groups/{gid} {
+      allow get, create, update: if request.auth != null;
+      allow list, delete: if false;
+
+      match /{document=**} {
+        allow read, write: if request.auth != null;
+      }
+    }
+  }
+}
