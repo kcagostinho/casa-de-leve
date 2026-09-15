@@ -397,3 +397,36 @@ details.sub-items .row.item { padding-left: 12px; }
 
 .receipt-img { display: block; max-width: 100%; border-radius: 12px; border: 1px solid var(--border); }
 button.link.small { font-size: 13px; padding: 0; font-weight: 600; }
+
+/* ---------- v3: geladeira por item, compartilhar, configurar ---------- */
+.share-row { display: flex; align-items: center; gap: 10px; margin: -4px 0 12px; }
+.card.setup { border-left: 4px solid var(--accent); }
+.card.debt-items { border-left-color: var(--accent); }
+.items-line {
+  margin-top: 10px; padding: 8px 10px; border-radius: 10px;
+  background: var(--card-2); font-size: 14px; line-height: 1.4;
+}
+.chips { display: flex; gap: 6px; overflow-x: auto; padding: 0 0 12px; margin-top: -6px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+button.chip { font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text); padding: 6px 12px; flex: none; }
+button.chip:active { background: var(--accent-soft); }
+.stepper {
+  display: inline-flex; align-items: stretch; border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+  background: var(--card-2);
+}
+.stepper button {
+  width: 48px; border: 0; background: transparent; color: var(--accent); font-size: 24px; font-weight: 700; cursor: pointer; min-height: 46px;
+}
+.stepper button:active { background: var(--accent-soft); }
+.stepper input {
+  width: 64px; text-align: center; border: 0; border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+  border-radius: 0; background: transparent; font-weight: 700; font-size: 20px; min-height: 46px; padding: 0;
+}
+.stepper input:focus { outline: none; }
+.stepper + * { margin-top: 14px; }
+.field .stepper { margin-bottom: 14px; }
+textarea.msg {
+  width: 100%; font: 14px/1.45 ui-monospace, Menlo, Consolas, monospace; padding: 12px; border: 1px solid var(--border);
+  border-radius: 12px; background: var(--card-2); color: var(--text); resize: vertical; white-space: pre-wrap;
+}
+details.sub-items > summary .grow { line-height: 1.5; }

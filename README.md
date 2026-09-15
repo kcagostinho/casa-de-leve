@@ -1,10 +1,10 @@
-# Sede — contas do espaço + geladeira
+# Casa De Leve — contas do espaço + geladeira
 
 App simples, feito pra celular, para um grupo de amigos que aluga um espaço:
 
-- **Início**: dashboard "quem deve pra quem" — um valor por dupla (contas + geladeira, já compensados), com a chave Pix de quem recebe, o detalhamento do que compõe o valor e o botão **Paguei tudo** (com comprovante opcional).
+- **Início**: dashboard "quem deve pra quem" — por dupla, o valor em R$ das contas (já compensado) e os itens da geladeira devidos, com a chave Pix de quem recebe, o detalhamento do que compõe o valor, **Paguei tudo** (com comprovante opcional) e **Compartilhar resumo** pro WhatsApp.
 - **Contas** (aluguel, água, luz e extras) divididas por igual. Um **responsável fixo** recebe as contas do espaço; o app controla quem já transferiu a parte dele, com comprovante.
-- **Geladeira**: quem pegou cerveja de quem, quem pagou pra quem, e o saldo entre cada dupla (estilo Splitwise).
+- **Geladeira**: por item — "Pedro pegou 2× Heineken do Kaique" → Pedro fica devendo 2 Heineken; zera devolvendo/repondo. Sem dinheiro envolvido.
 - **Galera**: integrantes (nome + PIN de 4 dígitos + chave Pix), responsável pelas contas, link de convite.
 - Funciona como PWA (dá pra "instalar" na tela inicial), atualiza em tempo real para todo mundo e continua abrindo sem internet (sincroniza depois).
 
@@ -28,7 +28,7 @@ mock.html + dev/      só para desenvolvimento local (dados falsos em localStora
 
 ### 1. Firebase
 
-1. Acesse <https://console.firebase.google.com> e crie um projeto (ex.: `sede-amigos`). Google Analytics pode ficar desligado.
+1. Acesse <https://console.firebase.google.com> e crie um projeto (ex.: `casa-de-leve`). Google Analytics pode ficar desligado.
 2. **Build → Firestore Database → Criar banco de dados** → modo de produção → região `southamerica-east1` (São Paulo).
 3. **Build → Authentication → Sign-in method** → ative **Anonymous** (Anônimo).
 4. **Configurações do projeto (engrenagem) → Seus apps → Adicionar app → Web (`</>`)**. Dê um apelido, não precisa marcar Hosting. Copie o objeto `firebaseConfig` que aparece e cole em `firebase-config.js` no lugar do exemplo.
@@ -39,10 +39,10 @@ Esses valores do `firebaseConfig` **não são segredo** — a proteção vem das
 
 ### 2. GitHub Pages
 
-1. Crie um repositório público no GitHub (ex.: `sede`).
+1. Crie um repositório público no GitHub (ex.: `casa-de-leve`).
 2. Envie os arquivos desta pasta (`git push`).
 3. No repositório: **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main` / `/ (root)`** → Save.
-4. Em ~1 minuto o app fica em `https://seu-usuario.github.io/sede/`.
+4. Em ~1 minuto o app fica em `https://seu-usuario.github.io/casa-de-leve/`.
 
 Qualquer outro host estático serve (Netlify, Cloudflare Pages, Vercel…): é só publicar a pasta.
 
@@ -65,9 +65,13 @@ Qualquer outro host estático serve (Netlify, Cloudflare Pages, Vercel…): é s
 - **Repetir em [próximo mês]** copia a conta para o mês seguinte com todo mundo pendente.
 
 ### Geladeira
-- **Pegou algo**: "Kaique pegou de Pedro R$ 12" → Kaique passa a dever Pedro.
-- **Pagou alguém**: "Kaique pagou pra Pedro R$ 7" → abate a dívida (ou cria crédito). Aceita comprovante.
-- O saldo mostrado é sempre o líquido entre cada dupla. **Acertar** já abre o lançamento com o valor exato.
+- **Pegou**: "Pedro pegou 2× Heineken do Kaique" → Pedro passa a dever 2 Heineken ao Kaique. Item é texto livre com sugestões (chips e autocompletar dos itens já usados); "heineken" e "Heineken" contam como o mesmo item.
+- **Devolveu**: "Pedro devolveu 2× Heineken pro Kaique" → abate. O botão **Devolvi** (ou **Devolveu**, pra quem recebe) já lança a quantidade exata.
+- O saldo é sempre por dupla e por item, líquido nos dois sentidos. Se alguém comprar bebida pro grupo todo, isso é uma conta **Extra** em Contas, não geladeira.
+
+### Compartilhar (WhatsApp)
+- **Contas → 📤 Resumo do mês**: mensagem com as contas do mês, quem ainda deve quanto pra quem (agrupado) e o Pix de quem recebe.
+- **Início → 📤 Compartilhar resumo**: resumo geral (R$ das contas + itens da geladeira). Nos dois casos abre uma prévia com **Copiar** e **Compartilhar/Abrir no WhatsApp** (no celular usa o compartilhamento nativo; no computador abre o WhatsApp Web com o texto pronto).
 
 ### Pix
 - Cada um cadastra a própria chave (no cadastro ou em Galera → seu nome → *Minha chave Pix*). Quem te dever vê a chave com botão **Copiar** no dashboard, no detalhe da conta e na geladeira.
@@ -99,9 +103,9 @@ groups/{gid}/members/{mid}   { name, pinHash, pix, active, createdAt }
 groups/{gid}/bills/{bid}     { category, title, month "YYYY-MM", amount (centavos), paidBy,
                                splitAmong: [mid], shares: { mid: { amount, paid, paidAt, markedBy, receiptId } },
                                notes, createdBy, createdAt, updatedAt }
-groups/{gid}/fridge/{fid}    { kind "pegou"|"pagou", from, to, amount, description, receiptId, createdBy, createdAt }
-                               (valor "fluiu" de from para to: to passa a dever from)
+groups/{gid}/fridge/{fid}    { kind "pegou"|"devolveu", from, to, item, itemKey, qty, note, createdBy, createdAt }
+                               (item "fluiu" de from para to: to passa a dever `qty` de `itemKey` a from)
 groups/{gid}/receipts/{rid}  { dataUrl, mime, bytes, name, uploadedBy, createdAt }
 ```
 
-Valores sempre em **centavos** (inteiros). `pinHash` = SHA-256 de `gid:mid:pin`.
+Valores das contas sempre em **centavos** (inteiros); a geladeira só tem quantidades. `pinHash` = SHA-256 de `gid:mid:pin`.

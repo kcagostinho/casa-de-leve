@@ -1,4 +1,4 @@
-// Sede — rateio de contas + geladeira compartilhada
+// Casa De Leve — rateio de contas + geladeira compartilhada
 // Vanilla JS + Firebase (Firestore) via CDN. Sem build.
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
@@ -27,7 +27,7 @@ const MONTHS_FULL = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
 // ---------------------------------------------------------------- helpers
 
 const $ = (sel, el = document) => el.querySelector(sel);
-const field = (form, name) => form.elements[name]; // form.name / form.title colidem com props do <form>
+const field = (form, name) => form.elements.namedItem(name); // form.name / form.title / elements.item colidem com props nativas
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const fmt = (cents) => brl.format((cents || 0) / 100);
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -213,7 +213,7 @@ function subscribeAll() {
       render();
     }, onErr),
     onSnapshot(query(col("fridge"), orderBy("createdAt", "desc"), limit(500)), (s) => {
-      state.fridge = s.docs.map((d) => ({ id: d.id, ...d.data() }));
+      state.fridge = s.docs.map((d) => ({ id: d.id, ...d.data() })).filter((e) => e.item && e.qty);
       state.ready.fridge = true;
       render();
     }, onErr),
@@ -449,123 +449,233 @@ function attachReceiptToShare(billId, mid, payload) {
   }), "Comprovante anexado");
 }
 
-// --- geladeira
+// --- geladeira (por item: "Pedro pegou 2× Heineken do Kaique")
 
-function addFridgeEntry({ kind, from, to, amount, description, receiptId }) {
+const DEFAULT_ITEMS = ["Heineken", "Brahma", "Skol", "Corona", "Coca-Cola", "Gelo", "Água"];
+const itemKeyOf = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+function addFridgeEntry({ kind, from, to, item, qty, note }) {
   return setDoc(doc(col("fridge")), {
-    kind, from, to, amount,
-    description: description || "",
-    receiptId: receiptId || null,
+    kind, from, to,
+    item: String(item).trim(),
+    itemKey: itemKeyOf(item),
+    qty: Math.max(1, Math.round(qty)),
+    note: note || "",
     createdBy: state.mid,
     createdAt: Date.now(),
   });
 }
 
-/** Saldos líquidos por dupla. Retorna { "a|b": valor } com a < b; valor > 0 => a deve b. */
-function pairBalances() {
-  const owes = {}; // owes[x][y] = quanto x deve y (bruto)
+/** Itens já usados no grupo (por frequência) + sugestões padrão. */
+function knownItems() {
+  const count = new Map(); // itemKey -> {label, n}
   for (const e of state.fridge) {
-    // valor fluiu de `from` para `to`: `to` passa a dever `from`
-    owes[e.to] ??= {};
-    owes[e.to][e.from] = (owes[e.to][e.from] || 0) + e.amount;
+    const c = count.get(e.itemKey) || { label: e.item, n: 0 };
+    c.n++;
+    count.set(e.itemKey, c);
   }
-  const ids = new Set();
-  for (const x in owes) for (const y in owes[x]) { ids.add(x); ids.add(y); }
-  const list = [...ids].sort();
-  const pairs = {};
-  for (let i = 0; i < list.length; i++) {
-    for (let j = i + 1; j < list.length; j++) {
-      const a = list[i], b = list[j];
-      const net = (owes[a]?.[b] || 0) - (owes[b]?.[a] || 0);
-      if (net !== 0) pairs[`${a}|${b}`] = net;
-    }
+  const used = [...count.entries()].sort((a, b) => b[1].n - a[1].n).map(([k]) => bestLabel(k));
+  const rest = DEFAULT_ITEMS.filter((d) => !count.has(itemKeyOf(d)));
+  return [...used, ...rest].slice(0, 12);
+}
+
+/**
+ * Saldos de itens por dupla: Map "a|b" -> Map itemKey -> {label, net}, com a < b e
+ * net > 0 => a deve b. Item "fluiu" de `from` para `to`: `to` passa a dever `from`.
+ */
+function itemBalances() {
+  const pairs = new Map();
+  const entries = [...state.fridge].sort((x, y) => x.createdAt - y.createdAt);
+  for (const e of entries) {
+    const [a, b] = [e.from, e.to].sort();
+    const key = `${a}|${b}`;
+    if (!pairs.has(key)) pairs.set(key, new Map());
+    const items = pairs.get(key);
+    const it = items.get(e.itemKey) || { label: e.item, net: 0 };
+    it.label = bestLabel(e.itemKey);
+    it.net += e.to === a ? e.qty : -e.qty;
+    items.set(e.itemKey, it);
+  }
+  for (const [key, items] of pairs) {
+    for (const [k, it] of items) if (it.net === 0) items.delete(k);
+    if (items.size === 0) pairs.delete(key);
   }
   return pairs;
 }
 
-/** Lista [{other, amount}] do ponto de vista de `mid`: amount > 0 => mid deve other. */
-function balancesFor(mid) {
-  const out = [];
-  for (const [key, net] of Object.entries(pairBalances())) {
-    const [a, b] = key.split("|");
-    if (a === mid) out.push({ other: b, amount: net });
-    else if (b === mid) out.push({ other: a, amount: -net });
-  }
-  return out.sort((x, y) => Math.abs(y.amount) - Math.abs(x.amount));
+/** Grafia mais usada de um item (empate: a que tem maiúscula). */
+function bestLabel(itemKey) {
+  const n = new Map();
+  for (const e of state.fridge) if (e.itemKey === itemKey) n.set(e.item, (n.get(e.item) || 0) + 1);
+  return [...n.entries()].sort((x, y) => y[1] - x[1] || (/^[A-ZÀ-Ú]/.test(y[0]) - /^[A-ZÀ-Ú]/.test(x[0])))[0]?.[0] || itemKey;
 }
 
-// --- dashboard: contas + geladeira consolidados por dupla
+/** Do ponto de vista de `mid`: [{ other, iOwe: [{key,label,qty}], theyOwe: [...] }] */
+function itemBalancesFor(mid) {
+  const out = [];
+  for (const [key, items] of itemBalances()) {
+    const [a, b] = key.split("|");
+    if (a !== mid && b !== mid) continue;
+    const row = { other: a === mid ? b : a, iOwe: [], theyOwe: [] };
+    for (const [k, it] of items) {
+      const mine = a === mid ? it.net : -it.net; // > 0 => eu devo
+      (mine > 0 ? row.iOwe : row.theyOwe).push({ key: k, label: it.label, qty: Math.abs(mine) });
+    }
+    out.push(row);
+  }
+  return out.sort((x, y) => nameOf(x.other).localeCompare(nameOf(y.other), "pt-BR"));
+}
+
+const fmtItems = (list) => list.map((i) => `${i.qty}× ${esc(i.label)}`).join(", ");
+const fmtItemsPlain = (list) => list.map((i) => `${i.qty}× ${i.label}`).join(", ");
+
+// --- dashboard: contas (R$) + geladeira (itens) por dupla
 
 /**
- * Lista de duplas com saldo: [{ debtor, creditor, amount, items }].
- * `items[].signed` > 0 no sentido devedor→credor; < 0 abate (o credor devia isso ao devedor).
+ * [{ a, b, moneyNet, shares, items }] — moneyNet > 0 ⇒ a deve b (só contas);
+ * shares[].signed relativo a a→b; items[].net > 0 ⇒ a deve b (quantidades).
  */
 function consolidated() {
-  const items = [];
-  for (const b of state.bills) {
-    for (const [mid, s] of Object.entries(b.shares || {})) {
-      if (mid === b.paidBy || s.paid) continue;
-      items.push({
-        type: "share", from: mid, to: b.paidBy, amount: s.amount, bill: b,
-        label: `${CATEGORIES[b.category]?.icon || "🧾"} ${esc(b.title)} · ${monthLabel(b.month)}`,
+  const pairs = new Map();
+  const get = (x, y) => {
+    const [a, b] = [x, y].sort();
+    const key = `${a}|${b}`;
+    if (!pairs.has(key)) pairs.set(key, { a, b, moneyNet: 0, shares: [], items: [] });
+    return pairs.get(key);
+  };
+  for (const bl of state.bills) {
+    for (const [mid, s] of Object.entries(bl.shares || {})) {
+      if (mid === bl.paidBy || s.paid) continue;
+      const p = get(mid, bl.paidBy);
+      const signed = mid === p.a ? s.amount : -s.amount;
+      p.moneyNet += signed;
+      p.shares.push({
+        from: mid, to: bl.paidBy, amount: s.amount, signed, bill: bl,
+        label: `${CATEGORIES[bl.category]?.icon || "🧾"} ${esc(bl.title)} · ${monthLabel(bl.month)}`,
       });
     }
   }
-  // geladeira entra como UMA linha por dupla (saldo líquido); o histórico completo fica na aba Geladeira
-  for (const [key, net] of Object.entries(pairBalances())) {
-    const [a, b] = key.split("|"); // net > 0 => a deve b
-    items.push({
-      type: "fridge", from: net > 0 ? a : b, to: net > 0 ? b : a, amount: Math.abs(net),
-      label: "🍺 Saldo da geladeira",
-    });
+  for (const [key, items] of itemBalances()) {
+    const [a, b] = key.split("|");
+    const p = get(a, b);
+    for (const [k, it] of items) p.items.push({ key: k, label: it.label, net: it.net });
   }
-  const pairs = new Map();
-  for (const it of items) {
-    const [a, b] = [it.from, it.to].sort();
-    const key = `${a}|${b}`;
-    if (!pairs.has(key)) pairs.set(key, { a, b, net: 0, items: [] });
-    const p = pairs.get(key);
-    p.net += it.from === a ? it.amount : -it.amount; // net > 0 => a deve b
-    p.items.push(it);
-  }
-  const out = [];
-  for (const p of pairs.values()) {
-    const hasShares = p.items.some((it) => it.type === "share");
-    if (p.net === 0 && !hasShares) continue; // geladeira empatada e nada pendente: nada a mostrar
-    const debtor = p.net >= 0 ? p.a : p.b;
-    const creditor = p.net >= 0 ? p.b : p.a;
-    out.push({
-      debtor, creditor, amount: Math.abs(p.net),
-      items: p.items.map((it) => ({ ...it, signed: it.from === debtor ? it.amount : -it.amount })),
-    });
-  }
-  return out.sort((x, y) => y.amount - x.amount);
+  return [...pairs.values()]
+    .filter((p) => p.moneyNet !== 0 || p.shares.length || p.items.length)
+    .sort((x, y) => Math.abs(y.moneyNet) - Math.abs(x.moneyNet));
 }
 
-/** Zera uma dupla: marca todas as cotas pendentes (nos dois sentidos) e lança o acerto da geladeira. */
-function settlePair(pair, receiptId) {
+/** Uma dupla vista por `mid`: money > 0 ⇒ eu devo; iOwe/theyOwe são itens com qty. */
+function pairView(p, mid) {
+  const isA = p.a === mid;
+  const rel = (n) => (isA ? n : -n);
+  return {
+    other: isA ? p.b : p.a,
+    money: rel(p.moneyNet),
+    iOwe: p.items.filter((it) => rel(it.net) > 0).map((it) => ({ ...it, qty: Math.abs(it.net) })),
+    theyOwe: p.items.filter((it) => rel(it.net) < 0).map((it) => ({ ...it, qty: Math.abs(it.net) })),
+    shares: p.shares.map((s) => ({ ...s, signed: rel(s.signed) })),
+  };
+}
+
+const findPair = (a, b) => consolidated().find((p) => (p.a === a && p.b === b) || (p.a === b && p.b === a));
+
+/** Quita em dinheiro: marca todas as cotas pendentes entre os dois (nos dois sentidos). */
+function settlePair(p, receiptId) {
   const now = Date.now();
+  const debtor = p.moneyNet >= 0 ? p.a : p.b;
   const byBill = new Map();
-  let fridgeNet = 0; // > 0: devedor deve ao credor pela geladeira
-  for (const it of pair.items) {
-    if (it.type === "share") {
-      const upd = byBill.get(it.bill.id) || {};
-      upd[`shares.${it.from}.paid`] = true;
-      upd[`shares.${it.from}.paidAt`] = now;
-      upd[`shares.${it.from}.markedBy`] = state.mid;
-      upd[`shares.${it.from}.receiptId`] = it.from === pair.debtor ? (receiptId || null) : null;
-      byBill.set(it.bill.id, upd);
-    } else {
-      fridgeNet += it.signed;
-    }
+  for (const s of p.shares) {
+    const upd = byBill.get(s.bill.id) || {};
+    upd[`shares.${s.from}.paid`] = true;
+    upd[`shares.${s.from}.paidAt`] = now;
+    upd[`shares.${s.from}.markedBy`] = state.mid;
+    upd[`shares.${s.from}.receiptId`] = s.from === debtor ? (receiptId || null) : null;
+    byBill.set(s.bill.id, upd);
   }
   for (const [billId, upd] of byBill) write(() => updateDoc(doc(col("bills"), billId), upd));
-  if (fridgeNet !== 0) {
-    const entry = fridgeNet > 0
-      ? { from: pair.debtor, to: pair.creditor, amount: fridgeNet, receiptId }
-      : { from: pair.creditor, to: pair.debtor, amount: -fridgeNet, receiptId: null };
-    write(() => addFridgeEntry({ kind: "pagou", description: "acerto", ...entry }));
+}
+
+// --- mensagens pro WhatsApp (texto puro, sem HTML)
+
+const groupTitle = () => state.group?.name || "Casa De Leve";
+
+function buildMonthMessage(month) {
+  const bills = state.bills.filter((b) => b.month === month);
+  const lines = [`🏠 *${groupTitle()}* — ${cap(monthLabel(month, true))}`];
+  if (!bills.length) return lines.concat("Nenhuma conta lançada neste mês.").join("\n");
+  const total = bills.reduce((a, b) => a + b.amount, 0);
+  lines.push(`Contas do mês: ${fmt(total)}`);
+  for (const b of bills) lines.push(`• ${CATEGORIES[b.category]?.icon || "🧾"} ${b.title}: ${fmt(b.amount)} (pagou ${nameOf(b.paidBy)})`);
+
+  const pending = new Map(); // "debtor|creditor" -> {debtor, creditor, amount, titles}
+  const paidUp = new Set();
+  for (const b of bills) {
+    for (const [mid, s] of Object.entries(b.shares || {})) {
+      if (mid === b.paidBy) continue;
+      if (s.paid) { paidUp.add(mid); continue; }
+      const k = `${mid}|${b.paidBy}`;
+      const p = pending.get(k) || { debtor: mid, creditor: b.paidBy, amount: 0, titles: [] };
+      p.amount += s.amount;
+      p.titles.push(b.title);
+      pending.set(k, p);
+    }
   }
+  lines.push("");
+  if (!pending.size) {
+    lines.push("✅ Todo mundo pagou! 🎉");
+    return lines.join("\n");
+  }
+  lines.push("⏳ *Falta pagar:*");
+  for (const p of [...pending.values()].sort((x, y) => y.amount - x.amount)) {
+    lines.push(`• ${nameOf(p.debtor)} → ${nameOf(p.creditor)}: ${fmt(p.amount)} (${p.titles.join(", ")})`);
+  }
+  const debtors = new Set([...pending.values()].map((p) => p.debtor));
+  const ok = [...paidUp].filter((m) => !debtors.has(m)).map(nameOf);
+  if (ok.length) lines.push(`✅ Em dia: ${ok.join(", ")}`);
+  const creditors = [...new Set([...pending.values()].map((p) => p.creditor))].filter((c) => memberById(c)?.pix);
+  if (creditors.length) {
+    lines.push("");
+    for (const c of creditors) lines.push(`💠 Pix ${nameOf(c)}: ${memberById(c).pix}`);
+  }
+  return lines.join("\n");
+}
+
+function buildGeneralMessage() {
+  const pairs = consolidated();
+  const lines = [`🏠 *${groupTitle()}* — resumo de ${new Date().toLocaleDateString("pt-BR")}`];
+  const money = [], items = [], creditors = new Set();
+  for (const p of pairs) {
+    if (p.moneyNet !== 0) {
+      const d = p.moneyNet > 0 ? p.a : p.b, c = p.moneyNet > 0 ? p.b : p.a;
+      money.push(`• ${nameOf(d)} → ${nameOf(c)}: ${fmt(Math.abs(p.moneyNet))}`);
+      creditors.add(c);
+    }
+    const aOwes = p.items.filter((i) => i.net > 0).map((i) => ({ label: i.label, qty: i.net }));
+    const bOwes = p.items.filter((i) => i.net < 0).map((i) => ({ label: i.label, qty: -i.net }));
+    if (aOwes.length) items.push(`• ${nameOf(p.a)} deve ${fmtItemsPlain(aOwes)} pra ${nameOf(p.b)}`);
+    if (bOwes.length) items.push(`• ${nameOf(p.b)} deve ${fmtItemsPlain(bOwes)} pra ${nameOf(p.a)}`);
+  }
+  lines.push("", "💸 *Contas:*", ...(money.length ? money : ["✅ Ninguém deve nada"]));
+  lines.push("", "🍺 *Geladeira:*", ...(items.length ? items : ["✅ Tudo zerado"]));
+  const pix = [...creditors].filter((c) => memberById(c)?.pix).map((c) => `💠 Pix ${nameOf(c)}: ${memberById(c).pix}`);
+  if (pix.length) lines.push("", ...pix);
+  return lines.join("\n");
+}
+
+function openShareDialog(title, text) {
+  state.shareText = text;
+  openDialog(`
+    <div class="sheet">
+      <button class="close" data-action="dlg-close" aria-label="Fechar">✕</button>
+      <h2>${esc(title)}</h2>
+      <p class="small muted">Prévia da mensagem. Cole no grupo do WhatsApp.</p>
+      <textarea class="msg" readonly rows="12">${esc(text)}</textarea>
+      <div class="actions">
+        <button class="btn" data-action="share-copy">Copiar</button>
+        <button class="btn btn-primary" data-action="share-wa">${navigator.share ? "Compartilhar" : "Abrir no WhatsApp"}</button>
+      </div>
+    </div>`);
 }
 
 // ---------------------------------------------------------------- sessão
@@ -632,7 +742,7 @@ function render() {
   if (state.fatal === "config") {
     root.innerHTML = `
       <div class="logo">🍻</div>
-      <h1 class="center" style="padding:0">Sede</h1>
+      <h1 class="center" style="padding:0">Casa De Leve</h1>
       <div class="card">
         <h2>Falta configurar o Firebase</h2>
         <p class="muted mb0">O arquivo <code>firebase-config.js</code> ainda está com o valor de exemplo. Cole ali o objeto <code>firebaseConfig</code> do console do Firebase e recarregue.</p>
@@ -674,7 +784,7 @@ function topbar() {
   return `
     <div class="topbar">
       <div>
-        <h1>${esc(state.group?.name || "Sede")}</h1>
+        <h1>${esc(state.group?.name || "Casa De Leve")}</h1>
         <div class="who">Você é <b>${esc(m.name)}</b></div>
       </div>
       <div class="avatar">${esc(initials(m.name))}</div>
@@ -686,13 +796,13 @@ function topbar() {
 function renderSetup(root) {
   root.innerHTML = `
     <div class="logo">🍻</div>
-    <h1 class="center" style="padding:0 0 4px">Sede</h1>
+    <h1 class="center" style="padding:0 0 4px">Casa De Leve</h1>
     <p class="center muted" style="padding:0 0 20px">Rateio das contas do espaço e controle da geladeira.</p>
     <div class="card">
       <h2>Criar um grupo novo</h2>
       <form data-form="create-group">
         <label class="field"><span>Nome do grupo</span>
-          <input type="text" name="name" required maxlength="40" placeholder="Ex.: Sede dos amigos" autocomplete="off">
+          <input type="text" name="name" required maxlength="40" placeholder="Ex.: Casa De Leve" value="Casa De Leve" autocomplete="off">
         </label>
         <button class="btn btn-primary btn-block" type="submit">Criar grupo</button>
       </form>
@@ -749,90 +859,120 @@ function renderLogin(root) {
 
 function renderHome() {
   const pairs = consolidated();
-  const iOwe = pairs.filter((p) => p.debtor === state.mid);
-  const owedMe = pairs.filter((p) => p.creditor === state.mid);
-  const others = pairs.filter((p) => p.debtor !== state.mid && p.creditor !== state.mid);
-  const totalOwe = iOwe.reduce((a, p) => a + p.amount, 0);
-  const totalOwed = owedMe.reduce((a, p) => a + p.amount, 0);
+  const mine = pairs
+    .filter((p) => p.a === state.mid || p.b === state.mid)
+    .map((p) => ({ p, v: pairView(p, state.mid) }))
+    // primeiro o que eu devo, depois o que me devem, depois só itens
+    .sort((x, y) => (y.v.money > 0) - (x.v.money > 0) || Math.abs(y.v.money) - Math.abs(x.v.money));
+  const others = pairs.filter((p) => p.a !== state.mid && p.b !== state.mid);
+  const totalOwe = mine.reduce((acc, { v }) => acc + Math.max(0, v.money), 0);
+  const totalOwed = mine.reduce((acc, { v }) => acc + Math.max(0, -v.money), 0);
 
   return `
+    ${setupCard()}
     <div class="strip">
       <div class="strip-item"><span class="small muted">Você deve</span><b class="${totalOwe ? "danger" : ""}">${fmt(totalOwe)}</b></div>
       <div class="strip-item"><span class="small muted">Te devem</span><b class="${totalOwed ? "ok" : ""}">${fmt(totalOwed)}</b></div>
     </div>
-
-    ${iOwe.length || owedMe.length ? "" : `<div class="card"><div class="empty"><div class="big">🍻</div>Você não deve ninguém e ninguém te deve.</div></div>`}
-    ${iOwe.map(debtCard).join("")}
-    ${owedMe.map(debtCard).join("")}
-
+    <div class="share-row"><button class="btn btn-sm" data-action="share-general">📤 Compartilhar resumo</button></div>
+    ${mine.length ? mine.map(({ p, v }) => debtCard(p, v)).join("") : `<div class="card"><div class="empty"><div class="big">🍻</div>Você não deve ninguém e ninguém te deve.</div></div>`}
     ${others.length ? `
     <div class="card">
       <details data-pair="__others" ${state.openPairs.has("__others") ? "open" : ""}>
         <summary>Entre os outros (${others.length})</summary>
-        ${others.map((p) => `
-          <details class="items sub-items" data-pair="${p.debtor}|${p.creditor}" ${state.openPairs.has(`${p.debtor}|${p.creditor}`) ? "open" : ""}>
-            <summary class="row" style="padding:10px 0">
-              <span class="avatar">${esc(initials(nameOf(p.debtor)))}</span>
-              <div class="grow">${esc(nameOf(p.debtor))} deve pra ${esc(nameOf(p.creditor))}</div>
-              <span class="amt">${fmt(p.amount)}</span>
-            </summary>
-            ${p.items.map((it) => itemRow(it, p)).join("")}
-          </details>`).join("")}
+        ${others.map(otherPairRow).join("")}
       </details>
     </div>` : ""}
-
     ${monthCard()}`;
 }
 
-function debtCard(p) {
-  const iOwe = p.debtor === state.mid;
-  const other = iOwe ? p.creditor : p.debtor;
-  const key = `${p.debtor}|${p.creditor}`;
-  const shares = p.items.filter((it) => it.type === "share");
+/** Avisos do que falta configurar (responsável, meu Pix). */
+function setupCard() {
+  const rows = [];
+  if (!state.group?.treasurer || !memberById(state.group.treasurer)) {
+    rows.push(`<div class="row"><div class="grow">💰 Ninguém definido como responsável pelas contas</div><button class="btn btn-sm" data-action="pick-treasurer">Definir</button></div>`);
+  }
+  if (!me()?.pix) {
+    rows.push(`<div class="row"><div class="grow">💠 Você ainda não cadastrou sua chave Pix</div><button class="btn btn-sm" data-action="member-pix">Cadastrar</button></div>`);
+  }
+  return rows.length ? `<div class="card setup"><h2>Falta configurar</h2>${rows.join("")}</div>` : "";
+}
+
+function debtCard(p, v) {
+  const key = `${p.a}|${p.b}`;
+  const cls = v.money > 0 ? "debt-owe" : v.money < 0 ? "debt-owed" : "debt-items";
+  const head = v.money > 0 ? "Você deve pra" : v.money < 0 ? "Te deve" : "Só itens da geladeira";
+  const itemsLine = v.iOwe.length || v.theyOwe.length ? `
+    <div class="items-line">🍺 ${v.iOwe.length ? `você deve <b>${fmtItems(v.iOwe)}</b>` : ""}${v.iOwe.length && v.theyOwe.length ? " · " : ""}${v.theyOwe.length ? `${esc(nameOf(v.other))} te deve <b>${fmtItems(v.theyOwe)}</b>` : ""}</div>` : "";
+  const n = v.shares.length + v.iOwe.length + v.theyOwe.length;
   return `
-    <div class="card debt ${iOwe ? "debt-owe" : "debt-owed"}">
+    <div class="card debt ${cls}">
       <div class="row" style="border:0;padding:0">
-        <span class="avatar big">${esc(initials(nameOf(other)))}</span>
+        <span class="avatar big">${esc(initials(nameOf(v.other)))}</span>
         <div class="grow">
-          <div class="small muted">${iOwe ? "Você deve pra" : "Te deve"}</div>
-          <div class="strong" style="font-size:18px">${esc(nameOf(other))}</div>
+          <div class="small muted">${head}</div>
+          <div class="strong" style="font-size:18px">${esc(nameOf(v.other))}</div>
         </div>
-        <div class="big-amount ${iOwe ? "danger" : "ok"}">${fmt(p.amount)}</div>
+        ${v.money ? `<div class="big-amount ${v.money > 0 ? "danger" : "ok"}">${fmt(Math.abs(v.money))}</div>` : ""}
       </div>
-      ${iOwe ? pixLine(other) : ""}
+      ${v.money > 0 ? pixLine(v.other) : ""}
+      ${itemsLine}
       <details class="items" data-pair="${key}" ${state.openPairs.has(key) ? "open" : ""}>
-        <summary>O que compõe esse valor (${p.items.length})</summary>
-        ${p.items.map((it) => itemRow(it, p)).join("")}
+        <summary>Detalhes (${n})</summary>
+        ${v.shares.map(shareRow).join("")}
+        ${v.iOwe.map((it) => itemRow(it, state.mid, v.other)).join("")}
+        ${v.theyOwe.map((it) => itemRow(it, v.other, state.mid)).join("")}
       </details>
-      ${p.amount > 0 || shares.length ? `
+      ${v.money !== 0 ? `
       <div class="actions" style="margin-top:10px">
-        <button class="btn btn-primary btn-block" data-action="settle-pair" data-debtor="${p.debtor}" data-creditor="${p.creditor}">
-          ${iOwe ? "Paguei tudo" : "Recebi tudo"} · ${fmt(p.amount)}
-        </button>
+        <button class="btn btn-primary btn-block" data-action="settle-pair" data-a="${p.a}" data-b="${p.b}">${v.money > 0 ? "Paguei tudo" : "Recebi tudo"} · ${fmt(Math.abs(v.money))}</button>
       </div>` : ""}
     </div>`;
 }
 
-function itemRow(it, p) {
-  const neg = it.signed < 0;
-  const mine = it.type === "share" && (it.from === state.mid || it.to === state.mid);
-  let note = "";
-  if (it.type === "fridge") note = `${esc(nameOf(it.from))} deve pra ${esc(nameOf(it.to))}${neg ? " — abate do total" : ""} · <button class="link small" data-action="tab" data-tab="fridge">ver lançamentos</button>`;
-  else if (neg) note = `abate: ${esc(nameOf(p.creditor))} devia isso pra ${esc(nameOf(p.debtor))}`;
-  else note = `${esc(nameOf(it.from))} paga pra ${esc(nameOf(it.to))}`;
+/** Linha de cota de conta (signed > 0 no sentido eu→outro). */
+function shareRow(s) {
+  const neg = s.signed < 0;
+  const mine = s.from === state.mid || s.to === state.mid;
+  const note = neg ? `abate: ${esc(nameOf(s.from))} deve isso pra ${esc(nameOf(s.to))}` : `${esc(nameOf(s.from))} paga pra ${esc(nameOf(s.to))}`;
   return `
     <div class="row item ${neg ? "neg" : ""}">
-      <div class="grow">
-        <div>${it.label}</div>
-        ${note ? `<div class="sub">${note}</div>` : ""}
-      </div>
-      <span class="amt">${neg ? "−" : ""}${fmt(Math.abs(it.signed))}</span>
+      <div class="grow"><div>${s.label}</div><div class="sub">${note}</div></div>
+      <span class="amt">${neg ? "−" : ""}${fmt(s.amount)}</span>
       ${mine ? `
         <div class="item-actions">
-          <button class="btn btn-sm" data-action="toggle-share" data-bill="${it.bill.id}" data-mid="${it.from}">${it.from === state.mid ? "Paguei" : "Recebi"}</button>
-          ${it.from === state.mid ? `<button class="btn btn-sm btn-ghost" data-action="attach-share" data-bill="${it.bill.id}" data-mid="${it.from}" title="Anexar comprovante">📎</button>` : ""}
+          <button class="btn btn-sm" data-action="toggle-share" data-bill="${s.bill.id}" data-mid="${s.from}">${s.from === state.mid ? "Paguei" : "Recebi"}</button>
+          ${s.from === state.mid ? `<button class="btn btn-sm btn-ghost" data-action="attach-share" data-bill="${s.bill.id}" data-mid="${s.from}" title="Anexar comprovante">📎</button>` : ""}
         </div>` : ""}
     </div>`;
+}
+
+/** Linha de item devido: `debtor` deve qty× item ao `creditor`. */
+function itemRow(it, debtor, creditor) {
+  const mine = debtor === state.mid || creditor === state.mid;
+  return `
+    <div class="row item">
+      <div class="grow"><div>🍺 ${esc(it.label)}</div><div class="sub">${esc(nameOf(debtor))} deve pra ${esc(nameOf(creditor))}</div></div>
+      <span class="amt">${it.qty}×</span>
+      ${mine ? `<div class="item-actions"><button class="btn btn-sm" data-action="return-items" data-debtor="${debtor}" data-creditor="${creditor}" data-item="${esc(it.label)}" data-qty="${it.qty}">${debtor === state.mid ? "Devolvi" : "Devolveu"}</button></div>` : ""}
+    </div>`;
+}
+
+function otherPairRow(p) {
+  const v = pairView(p, p.a); // relativo a `a`
+  const key = `${p.a}|${p.b}`;
+  const debtor = v.money >= 0 ? p.a : p.b, creditor = v.money >= 0 ? p.b : p.a;
+  const bits = [];
+  if (v.money) bits.push(`${esc(nameOf(debtor))} deve <b>${fmt(Math.abs(v.money))}</b> pra ${esc(nameOf(creditor))}`);
+  if (v.iOwe.length) bits.push(`${esc(nameOf(p.a))} deve <b>${fmtItems(v.iOwe)}</b> pra ${esc(nameOf(p.b))}`);
+  if (v.theyOwe.length) bits.push(`${esc(nameOf(p.b))} deve <b>${fmtItems(v.theyOwe)}</b> pra ${esc(nameOf(p.a))}`);
+  return `
+    <details class="items sub-items" data-pair="${key}" ${state.openPairs.has(key) ? "open" : ""}>
+      <summary class="row" style="padding:10px 0"><div class="grow">${bits.join("<br>")}</div><span class="muted">▸</span></summary>
+      ${v.shares.map(shareRow).join("")}
+      ${v.iOwe.map((it) => itemRow(it, p.a, p.b)).join("")}
+      ${v.theyOwe.map((it) => itemRow(it, p.b, p.a)).join("")}
+    </details>`;
 }
 
 function monthCard() {
@@ -853,20 +993,6 @@ function monthCard() {
     </div>`;
 }
 
-function balanceLine({ other, amount }, withAction = false) {
-  const n = esc(nameOf(other));
-  const text = amount > 0
-    ? `Você deve <b class="danger">${fmt(amount)}</b> pra ${n}`
-    : `${n} te deve <b class="ok">${fmt(-amount)}</b>`;
-  return `
-    <div class="row" style="flex-wrap:wrap">
-      <span class="avatar">${esc(initials(nameOf(other)))}</span>
-      <div class="grow">${text}</div>
-      ${withAction && amount > 0 ? `<button class="btn btn-sm" data-action="settle" data-other="${other}" data-amount="${amount}">Acertar</button>` : ""}
-      ${withAction && amount > 0 ? `<div style="flex-basis:100%">${pixLine(other)}</div>` : ""}
-    </div>`;
-}
-
 // --- Contas
 
 function renderBills() {
@@ -880,7 +1006,11 @@ function renderBills() {
       <span class="label">${cap(monthLabel(state.month, true))}</span>
       <button class="btn" data-action="month" data-delta="1" aria-label="Próximo mês">›</button>
     </div>
-    ${bills.length ? `<p class="muted small right">Total do mês: <b>${fmt(total)}</b></p>` : ""}
+    ${bills.length ? `
+      <div class="share-row" style="justify-content:space-between">
+        <button class="btn btn-sm" data-action="share-month">📤 Resumo do mês</button>
+        <span class="muted small">Total do mês: <b>${fmt(total)}</b></span>
+      </div>` : ""}
     ${bills.length ? bills.map(billCard).join("") : `
       <div class="card"><div class="empty"><div class="big">🧾</div>Nenhuma conta em ${monthLabel(state.month, true)}.<br><span class="small">Toque em “Nova conta” pra lançar.</span></div></div>`}
     <button class="fab" data-action="bill-new"><span class="plus">+</span> Nova conta</button>`;
@@ -1004,27 +1134,25 @@ function billFormHtml(b) {
 // --- Geladeira
 
 function renderFridge() {
-  const mine = balancesFor(state.mid);
-  const all = Object.entries(pairBalances()).map(([k, net]) => {
-    const [a, b] = k.split("|");
-    return net > 0 ? { debtor: a, creditor: b, amount: net } : { debtor: b, creditor: a, amount: -net };
-  }).sort((x, y) => y.amount - x.amount);
-  const others = all.filter((p) => p.debtor !== state.mid && p.creditor !== state.mid);
-  const iOwe = mine.filter((b) => b.amount > 0).reduce((a, b) => a + b.amount, 0);
-  const owedToMe = mine.filter((b) => b.amount < 0).reduce((a, b) => a - b.amount, 0);
-
+  const mine = itemBalancesFor(state.mid);
+  const others = [...itemBalances()].filter(([key]) => !key.split("|").includes(state.mid));
   return `
     <div class="card">
-      <div class="card-title"><h2>Seus saldos</h2>
-        ${mine.length ? `<span class="small muted">${iOwe ? `deve ${fmt(iOwe)}` : ""}${iOwe && owedToMe ? " · " : ""}${owedToMe ? `a receber ${fmt(owedToMe)}` : ""}</span>` : ""}
-      </div>
-      ${mine.length ? mine.map((b) => balanceLine(b, true)).join("") : `<div class="empty"><div class="big">🍻</div>Tudo zerado com todo mundo.</div>`}
+      <h2>Seus saldos</h2>
+      ${mine.length ? mine.map(fridgeBalanceCard).join("") : `<div class="empty"><div class="big">🍻</div>Você não deve nada e ninguém te deve.</div>`}
     </div>
     ${others.length ? `
     <div class="card">
-      <details>
-        <summary>Saldos entre os outros (${others.length})</summary>
-        ${others.map((p) => `<div class="row"><div class="grow">${esc(nameOf(p.debtor))} deve <b>${fmt(p.amount)}</b> pra ${esc(nameOf(p.creditor))}</div></div>`).join("")}
+      <details data-pair="__fridge_others" ${state.openPairs.has("__fridge_others") ? "open" : ""}>
+        <summary>Entre os outros (${others.length})</summary>
+        ${others.map(([key, items]) => {
+          const [a, b] = key.split("|");
+          const aOwes = [...items.values()].filter((i) => i.net > 0).map((i) => ({ label: i.label, qty: i.net }));
+          const bOwes = [...items.values()].filter((i) => i.net < 0).map((i) => ({ label: i.label, qty: -i.net }));
+          return `<div class="row"><div class="grow">
+            ${aOwes.length ? `${esc(nameOf(a))} deve <b>${fmtItems(aOwes)}</b> pra ${esc(nameOf(b))}` : ""}${aOwes.length && bOwes.length ? "<br>" : ""}${bOwes.length ? `${esc(nameOf(b))} deve <b>${fmtItems(bOwes)}</b> pra ${esc(nameOf(a))}` : ""}
+          </div></div>`;
+        }).join("")}
       </details>
     </div>` : ""}
     <div class="card">
@@ -1034,19 +1162,34 @@ function renderFridge() {
     <button class="fab" data-action="fridge-new"><span class="plus">+</span> Lançar</button>`;
 }
 
+function fridgeBalanceCard({ other, iOwe, theyOwe }) {
+  const line = (it, debtor, creditor) => `
+    <div class="row item">
+      <div class="grow">${debtor === state.mid ? "Você deve" : `${esc(nameOf(debtor))} te deve`} <b>${it.qty}× ${esc(it.label)}</b></div>
+      <button class="btn btn-sm" data-action="return-items" data-debtor="${debtor}" data-creditor="${creditor}" data-item="${esc(it.label)}" data-qty="${it.qty}">${debtor === state.mid ? "Devolvi" : "Devolveu"}</button>
+    </div>`;
+  return `
+    <div class="row" style="flex-wrap:wrap;align-items:flex-start">
+      <span class="avatar">${esc(initials(nameOf(other)))}</span>
+      <div class="grow">
+        <div class="strong">${esc(nameOf(other))}</div>
+        ${iOwe.map((it) => line(it, state.mid, other)).join("")}
+        ${theyOwe.map((it) => line(it, other, state.mid)).join("")}
+      </div>
+    </div>`;
+}
+
 function fridgeRow(e) {
-  // kind "pegou": `to` pegou de `from`. kind "pagou": `from` pagou pra `to`.
   const text = e.kind === "pegou"
-    ? `<b>${esc(nameOf(e.to))}</b> pegou de <b>${esc(nameOf(e.from))}</b>`
-    : `<b>${esc(nameOf(e.from))}</b> pagou pra <b>${esc(nameOf(e.to))}</b>`;
+    ? `<b>${esc(nameOf(e.to))}</b> pegou <b>${e.qty}× ${esc(e.item)}</b> de <b>${esc(nameOf(e.from))}</b>`
+    : `<b>${esc(nameOf(e.from))}</b> devolveu <b>${e.qty}× ${esc(e.item)}</b> pra <b>${esc(nameOf(e.to))}</b>`;
   return `
     <div class="row">
-      <span class="ico">${e.kind === "pegou" ? "🍺" : "💸"}</span>
+      <span class="ico">${e.kind === "pegou" ? "🍺" : "↩️"}</span>
       <div class="grow">
         <div>${text}</div>
-        <div class="sub">${dateLabel(e.createdAt)}${e.description ? " · " + esc(e.description) : ""}${e.receiptId ? ` · <button class="link small" data-action="view-receipt" data-id="${e.receiptId}">🧾 comprovante</button>` : ""}</div>
+        <div class="sub">${dateLabel(e.createdAt)}${e.note ? " · " + esc(e.note) : ""}</div>
       </div>
-      <span class="amt">${fmt(e.amount)}</span>
       <button class="btn btn-sm btn-ghost" data-action="fridge-delete" data-id="${e.id}" aria-label="Excluir">🗑</button>
     </div>`;
 }
@@ -1057,50 +1200,56 @@ function fridgeFormHtml(preset = {}) {
   const others = pool.filter((m) => m.id !== state.mid);
   const other = preset.other || others[0]?.id || "";
   const opts = (sel) => pool.map((m) => `<option value="${m.id}" ${m.id === sel ? "selected" : ""}>${esc(m.name)}${m.id === state.mid ? " (você)" : ""}</option>`).join("");
+  const items = knownItems();
   return `
     <div class="sheet">
       <button class="close" data-action="dlg-close" aria-label="Fechar">✕</button>
       <h2>Lançar na geladeira</h2>
       <form data-form="fridge">
         <div class="seg">
-          <label><input type="radio" name="kind" value="pegou" ${kind === "pegou" ? "checked" : ""}><span>🍺 Pegou algo</span></label>
-          <label><input type="radio" name="kind" value="pagou" ${kind === "pagou" ? "checked" : ""}><span>💸 Pagou alguém</span></label>
+          <label><input type="radio" name="kind" value="pegou" ${kind === "pegou" ? "checked" : ""}><span>🍺 Pegou</span></label>
+          <label><input type="radio" name="kind" value="devolveu" ${kind === "devolveu" ? "checked" : ""}><span>↩️ Devolveu</span></label>
         </div>
-        <label class="field"><span data-label-a>${kind === "pegou" ? "Quem pegou" : "Quem pagou"}</span>
-          <select name="a">${opts(state.mid)}</select>
+        <label class="field"><span data-label-a>${kind === "pegou" ? "Quem pegou" : "Quem devolveu"}</span>
+          <select name="a">${opts(preset.a || state.mid)}</select>
         </label>
         <label class="field"><span data-label-b>${kind === "pegou" ? "De quem" : "Pra quem"}</span>
           <select name="b">${opts(other)}</select>
         </label>
-        <label class="field"><span>Valor</span>
-          <input type="text" class="money" name="amount" inputmode="numeric" data-cents="${preset.amount || 0}" value="${fmt(preset.amount || 0)}" autocomplete="off">
+        <label class="field"><span>O quê</span>
+          <input type="text" name="item" list="item-list" required maxlength="40" placeholder="Ex.: Heineken" value="${esc(preset.item || "")}" autocomplete="off">
+          <datalist id="item-list">${items.map((i) => `<option value="${esc(i)}">`).join("")}</datalist>
         </label>
-        <label class="field"><span>O quê (opcional)</span>
-          <input type="text" name="description" maxlength="80" placeholder="${kind === "pegou" ? "Ex.: 2 latas de Heineken" : "Ex.: acerto do mês"}" value="${esc(preset.description || "")}" autocomplete="off">
-        </label>
-        <div class="field" data-only-pagou ${kind === "pagou" ? "" : "hidden"}>
-          <button type="button" class="btn btn-block" data-action="pick-receipt">📎 Anexar comprovante (opcional)</button>
-          <div class="small muted mt" data-receipt-status></div>
+        <div class="chips">${items.slice(0, 8).map((i) => `<button type="button" class="chip" data-action="pick-item" data-item="${esc(i)}">${esc(i)}</button>`).join("")}</div>
+        <div class="field">
+          <span class="field-label">Quantidade</span>
+          <div class="stepper">
+            <button type="button" data-action="step" data-delta="-1" aria-label="Menos">−</button>
+            <input type="text" name="qty" inputmode="numeric" pattern="[0-9]*" value="${preset.qty || 1}" aria-label="Quantidade">
+            <button type="button" data-action="step" data-delta="1" aria-label="Mais">+</button>
+          </div>
         </div>
+        <label class="field"><span>Observação (opcional)</span>
+          <input type="text" name="note" maxlength="80" placeholder="Ex.: da gaveta de baixo" autocomplete="off">
+        </label>
         <div class="error" data-error hidden></div>
         <button class="btn btn-primary btn-block" type="submit">Lançar</button>
       </form>
     </div>`;
 }
 
-function settleFormHtml(pair) {
-  const iOwe = pair.debtor === state.mid;
-  const other = iOwe ? pair.creditor : pair.debtor;
-  const shares = pair.items.filter((it) => it.type === "share").length;
-  const fridge = pair.items.some((it) => it.type === "fridge");
+function settleFormHtml(p) {
+  const v = pairView(p, state.mid);
+  const iOwe = v.money > 0;
+  const n = v.shares.length;
   return `
     <div class="sheet">
       <button class="close" data-action="dlg-close" aria-label="Fechar">✕</button>
-      <h2>Acertar tudo com ${esc(nameOf(other))}</h2>
-      <p>${iOwe ? `Você paga <b>${fmt(pair.amount)}</b> pra ${esc(nameOf(other))}.` : `${esc(nameOf(other))} te paga <b>${fmt(pair.amount)}</b>.`}</p>
-      ${iOwe ? pixLine(other) : ""}
-      <p class="small muted mt">Isso marca como pagas ${shares} parte${shares === 1 ? "" : "s"} de conta${fridge ? " e lança o acerto da geladeira" : ""}. Os detalhes continuam no histórico.</p>
-      <form data-form="settle" data-debtor="${pair.debtor}" data-creditor="${pair.creditor}">
+      <h2>Acertar contas com ${esc(nameOf(v.other))}</h2>
+      <p>${iOwe ? `Você paga <b>${fmt(v.money)}</b> pra ${esc(nameOf(v.other))}.` : `${esc(nameOf(v.other))} te paga <b>${fmt(-v.money)}</b>.`}</p>
+      ${iOwe ? pixLine(v.other) : ""}
+      <p class="small muted mt">Isso marca como pagas ${n} parte${n === 1 ? "" : "s"} de conta. Itens da geladeira não entram — use “Devolvi”.</p>
+      <form data-form="settle" data-a="${p.a}" data-b="${p.b}">
         <div class="field">
           <button type="button" class="btn btn-block" data-action="pick-receipt">📎 Anexar comprovante (opcional)</button>
           <div class="small muted mt" data-receipt-status></div>
@@ -1319,8 +1468,8 @@ const actions = {
     toast((await copyText(m.pix)) ? `Pix de ${m.name} copiado!` : "Não consegui copiar. Copie manualmente.", 3000);
   },
   "settle-pair": (el) => {
-    const pair = consolidated().find((p) => p.debtor === el.dataset.debtor && p.creditor === el.dataset.creditor);
-    if (!pair) return toast("Nada pendente com essa pessoa.");
+    const pair = findPair(el.dataset.a, el.dataset.b);
+    if (!pair || pair.moneyNet === 0) return toast("Nada pendente em dinheiro com essa pessoa.");
     openDialog(settleFormHtml(pair));
   },
   "pick-receipt": async (el) => {
@@ -1343,11 +1492,49 @@ const actions = {
   "fridge-delete": async (el) => {
     const e = state.fridge.find((x) => x.id === el.dataset.id);
     if (!e) return;
-    if (!(await confirmDialog(`Excluir este lançamento de ${fmt(e.amount)}?`, "Excluir"))) return;
-    deleteReceipt(e.receiptId);
+    if (!(await confirmDialog(`Excluir o lançamento de ${e.qty}× ${e.item}?`, "Excluir"))) return;
     write(() => deleteDoc(doc(col("fridge"), e.id)), "Lançamento excluído");
   },
-  settle: (el) => openDialog(fridgeFormHtml({ kind: "pagou", other: el.dataset.other, amount: Number(el.dataset.amount), description: "acerto" })),
+  "return-items": async (el) => {
+    const { debtor, creditor, item, qty } = el.dataset;
+    const who = debtor === state.mid ? "Você devolveu" : `${nameOf(debtor)} devolveu`;
+    if (!(await confirmDialog(`${who} ${qty}× ${item} pra ${nameOf(creditor)}? Isso zera esse item entre vocês.`, "Confirmar"))) return;
+    write(() => addFridgeEntry({ kind: "devolveu", from: debtor, to: creditor, item, qty: Number(qty), note: "" }), `${qty}× ${item} devolvido`);
+  },
+  "pick-item": (el) => {
+    const input = field(el.closest("form"), "item");
+    input.value = el.dataset.item;
+    input.focus();
+  },
+  step: (el) => {
+    const input = field(el.closest("form"), "qty");
+    const n = Math.max(1, (parseInt(input.value, 10) || 1) + Number(el.dataset.delta));
+    input.value = n;
+  },
+  "pick-treasurer": () => {
+    openDialog(`
+      <div class="sheet">
+        <button class="close" data-action="dlg-close" aria-label="Fechar">✕</button>
+        <h2>Quem recebe as contas?</h2>
+        <p class="muted small">Aluguel, água e luz são pagos por essa pessoa; os outros transferem a parte deles pra ela.</p>
+        <div class="btn-list">
+          ${activeMembers().map((m) => `<button class="btn" data-action="set-treasurer" data-id="${m.id}"><span class="avatar">${esc(initials(m.name))}</span>${esc(m.name)}${m.id === state.mid ? ' <span class="muted small">(você)</span>' : ""}</button>`).join("")}
+        </div>
+      </div>`);
+  },
+  "share-general": () => openShareDialog("Resumo pro grupo", buildGeneralMessage()),
+  "share-month": () => openShareDialog(`Resumo de ${monthLabel(state.month)}`, buildMonthMessage(state.month)),
+  "share-copy": async () => {
+    toast((await copyText(state.shareText || "")) ? "Mensagem copiada! Cole no WhatsApp." : "Não consegui copiar. Selecione o texto e copie.", 3000);
+  },
+  "share-wa": async () => {
+    const text = state.shareText || "";
+    if (navigator.share) {
+      try { await navigator.share({ text }); } catch { /* cancelou */ }
+    } else {
+      window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank", "noopener");
+    }
+  },
 
   "member-new": () => openDialog(memberFormHtml({ mode: "new" })),
   "member-open": (el) => {
@@ -1493,25 +1680,26 @@ const forms = {
   fridge: (form) => {
     const kind = field(form, "kind").value;
     const a = field(form, "a").value, b = field(form, "b").value;
-    const amount = Number(field(form, "amount").dataset.cents || 0);
-    const description = field(form, "description").value.trim();
+    const item = field(form, "item").value.trim();
+    const qty = parseInt(field(form, "qty").value, 10) || 0;
+    const note = field(form, "note").value.trim();
     if (!a || !b) return showFormError(form, "Escolha as duas pessoas.");
     if (a === b) return showFormError(form, "Escolha duas pessoas diferentes.");
-    if (amount <= 0) return showFormError(form, "Informe o valor.");
-    // pegou: a pegou de b => valor fluiu de b para a. pagou: a pagou pra b => fluiu de a para b.
-    const receiptId = kind === "pagou" && state.pendingReceipt ? saveReceipt(state.pendingReceipt) : null;
+    if (!item) return showFormError(form, "Diga o que foi pego (ex.: Heineken).");
+    if (qty < 1) return showFormError(form, "Quantidade mínima: 1.");
+    // pegou: a pegou de b => item fluiu de b para a. devolveu: a devolveu pra b => fluiu de a para b.
     const entry = kind === "pegou"
-      ? { kind, from: b, to: a, amount, description }
-      : { kind, from: a, to: b, amount, description, receiptId };
+      ? { kind, from: b, to: a, item, qty, note }
+      : { kind, from: a, to: b, item, qty, note };
     if (write(() => addFridgeEntry(entry), "Lançado!")) closeDialog();
   },
   settle: (form) => {
-    const pair = consolidated().find((p) => p.debtor === form.dataset.debtor && p.creditor === form.dataset.creditor);
-    if (!pair) { closeDialog(); return toast("Nada pendente com essa pessoa."); }
+    const pair = findPair(form.dataset.a, form.dataset.b);
+    if (!pair || pair.moneyNet === 0) { closeDialog(); return toast("Nada pendente em dinheiro com essa pessoa."); }
     const receiptId = state.pendingReceipt ? saveReceipt(state.pendingReceipt) : null;
     settlePair(pair, receiptId);
     closeDialog();
-    toast(`Acerto com ${nameOf(pair.debtor === state.mid ? pair.creditor : pair.debtor)} registrado!`);
+    toast(`Acerto com ${nameOf(pair.a === state.mid ? pair.b : pair.a)} registrado!`);
   },
   "group-rename": (form) => {
     const name = field(form, "name").value.trim();
@@ -1549,10 +1737,8 @@ document.addEventListener("change", (e) => {
   // formulário da geladeira: trocar tipo ajusta os rótulos
   if (el.matches('input[name="kind"]')) {
     const f = el.form;
-    $("[data-label-a]", f).textContent = el.value === "pegou" ? "Quem pegou" : "Quem pagou";
+    $("[data-label-a]", f).textContent = el.value === "pegou" ? "Quem pegou" : "Quem devolveu";
     $("[data-label-b]", f).textContent = el.value === "pegou" ? "De quem" : "Pra quem";
-    field(f, "description").placeholder = el.value === "pegou" ? "Ex.: 2 latas de Heineken" : "Ex.: acerto do mês";
-    $("[data-only-pagou]", f).hidden = el.value !== "pagou";
   }
 });
 

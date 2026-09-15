@@ -1,7 +1,7 @@
 {
-  "name": "Sede — contas e geladeira",
-  "short_name": "Sede",
-  "description": "Rateio das contas do espaço e controle da geladeira entre amigos.",
+  "name": "Casa De Leve",
+  "short_name": "Casa De Leve",
+  "description": "Casa De Leve — rateio das contas do espaço e controle da geladeira entre amigos.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
