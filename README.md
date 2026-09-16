@@ -81,6 +81,12 @@ Qualquer outro host estático serve (Netlify, Cloudflare Pages, Vercel…): é s
 - PDF só até 600 KB (comprovantes de banco costumam ter 30–100 KB); maior que isso, tire um print.
 - Desmarcar um pagamento apaga o comprovante dele; excluir uma conta ou lançamento apaga os comprovantes ligados.
 
+### Administrador
+- Quem cria o grupo (o primeiro cadastrado) é o administrador (selo 🛡️ na Galera) e pode promover outros: Galera → nome → *Tornar administrador*.
+- Só admin pode: **excluir integrante**, ativar/desativar, redefinir o PIN de outra pessoa, definir o responsável pelas contas, adicionar integrante manualmente e renomear o grupo. Os demais editam só o próprio Pix e PIN.
+- Excluir apaga o cadastro (a pessoa perde o acesso e sai das divisões); o nome fica guardado em `groups/{gid}.removedNames` só para o histórico antigo continuar legível.
+- Como o PIN, a restrição é feita no app (todos usam o mesmo login anônimo do Firebase); não é uma barreira contra alguém com conhecimento técnico e o link do grupo.
+
 ### PIN
 - O PIN só evita que alguém marque algo como outra pessoa sem querer; não é segurança de verdade (quem tem o link do grupo vê tudo).
 - Esqueceu? Qualquer integrante pode redefinir o PIN de outro: Galera → toque no nome → *Redefinir PIN*.
@@ -98,8 +104,8 @@ python dev/serve.py 8790
 ## Estrutura dos dados (Firestore)
 
 ```
-groups/{gid}                 { name, treasurer (mid do responsável), createdAt }
-groups/{gid}/members/{mid}   { name, pinHash, pix, active, createdAt }
+groups/{gid}                 { name, treasurer (mid do responsável), removedNames {mid: nome}, createdAt }
+groups/{gid}/members/{mid}   { name, pinHash, pix, active, admin, createdAt }
 groups/{gid}/bills/{bid}     { category, title, month "YYYY-MM", amount (centavos), paidBy,
                                splitAmong: [mid], shares: { mid: { amount, paid, paidAt, markedBy, receiptId } },
                                notes, createdBy, createdAt, updatedAt }

@@ -1,7 +1,7 @@
 // Service worker: deixa o app abrir sem internet (a casca) e cacheia o SDK do Firebase.
 // Arquivos próprios: network-first (sempre pega a versão nova quando online).
 // SDK do Firebase (URLs versionadas): cache-first.
-const VERSION = "cdl-v3";
+const VERSION = "cdl-v4";
 const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./firebase-config.js", "./manifest.webmanifest", "./icons/icon.svg"];
 
 self.addEventListener("install", (e) => {

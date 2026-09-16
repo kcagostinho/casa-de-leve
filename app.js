@@ -149,8 +149,24 @@ const state = {
 
 const me = () => state.members.find((m) => m.id === state.mid) || null;
 const memberById = (id) => state.members.find((m) => m.id === id);
-const nameOf = (id) => memberById(id)?.name || "?";
+const nameOf = (id) => memberById(id)?.name || state.group?.removedNames?.[id] || "?";
 const activeMembers = () => state.members.filter((m) => m.active !== false);
+
+// --- administrador: quem tem admin:true; se ninguém tem, o integrante mais antigo (o criador do grupo)
+const admins = () => state.members.filter((m) => m.admin === true);
+function isAdmin(mid) {
+  if (!mid) return false;
+  const list = admins();
+  if (list.length) return list.some((m) => m.id === mid);
+  const oldest = [...state.members].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))[0];
+  return oldest?.id === mid;
+}
+const amAdmin = () => isAdmin(state.mid);
+function requireAdmin() {
+  if (amAdmin()) return true;
+  toast("Só o administrador do grupo pode fazer isso.", 3000);
+  return false;
+}
 
 // ---------------------------------------------------------------- firebase
 
@@ -753,6 +769,11 @@ function render() {
   }
   if (!me()) return renderLogin(root);
 
+  // o admin implícito (mais antigo, quando ninguém tem a flag) grava a flag pra si — uma vez
+  if (!admins().length && amAdmin() && !state.adminHealed) {
+    state.adminHealed = true;
+    write(() => updateDoc(doc(col("members"), state.mid), { admin: true }));
+  }
   tabbar.hidden = false;
   tabbar.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
   const views = { home: renderHome, bills: renderBills, fridge: renderFridge, people: renderPeople };
@@ -876,7 +897,9 @@ function renderHome() {
 function setupCard() {
   const rows = [];
   if (!state.group?.treasurer || !memberById(state.group.treasurer)) {
-    rows.push(`<div class="row"><div class="grow">💰 Ninguém definido como responsável pelas contas</div><button class="btn btn-sm" data-action="pick-treasurer">Definir</button></div>`);
+    rows.push(amAdmin()
+      ? `<div class="row"><div class="grow">💰 Ninguém definido como responsável pelas contas</div><button class="btn btn-sm" data-action="pick-treasurer">Definir</button></div>`
+      : `<div class="row"><div class="grow">💰 Ninguém definido como responsável pelas contas — peça ao administrador</div></div>`);
   }
   if (!me()?.pix) {
     rows.push(`<div class="row"><div class="grow">💠 Você ainda não cadastrou sua chave Pix</div><button class="btn btn-sm" data-action="member-pix">Cadastrar</button></div>`);
@@ -1248,12 +1271,12 @@ function renderPeople() {
   const link = inviteLink();
   return `
     <div class="card">
-      <div class="card-title"><h2>Integrantes</h2><button class="btn btn-sm" data-action="member-new">+ Adicionar</button></div>
+      <div class="card-title"><h2>Integrantes</h2>${amAdmin() ? `<button class="btn btn-sm" data-action="member-new">+ Adicionar</button>` : ""}</div>
       ${state.members.map((m) => `
         <div class="row tap" data-action="member-open" data-id="${m.id}">
           <span class="avatar">${esc(initials(m.name))}</span>
           <div class="grow">
-            <div>${esc(m.name)}${m.id === state.mid ? ' <span class="muted small">(você)</span>' : ""}${state.group?.treasurer === m.id ? ' <span class="chip warn">💰 responsável</span>' : ""}</div>
+            <div>${esc(m.name)}${m.id === state.mid ? ' <span class="muted small">(você)</span>' : ""}${isAdmin(m.id) ? ' <span class="chip">🛡️ admin</span>' : ""}${state.group?.treasurer === m.id ? ' <span class="chip warn">💰 responsável</span>' : ""}</div>
             <div class="sub ellipsis">${m.active === false ? "inativo" : "ativo"} · ${m.pix ? `Pix: ${esc(m.pix)}` : "sem Pix"}</div>
           </div>
           <span class="muted">›</span>
@@ -1273,11 +1296,12 @@ function renderPeople() {
 
     <div class="card">
       <h2>Grupo</h2>
-      <div class="row"><div class="grow">${esc(state.group.name)}</div><button class="btn btn-sm" data-action="group-rename">Renomear</button></div>
+      <div class="row"><div class="grow">${esc(state.group.name)}</div>${amAdmin() ? `<button class="btn btn-sm" data-action="group-rename">Renomear</button>` : ""}</div>
+      <div class="row"><div class="grow"><div>🛡️ Administração</div><div class="sub">${state.members.filter((m) => isAdmin(m.id)).map((a) => esc(a.name)).join(", ") || "—"}${amAdmin() ? " · você administra o grupo" : ""}</div></div></div>
       <div class="row">
         <div class="grow">
           <div>💰 Responsável pelas contas</div>
-          <div class="sub">${state.group.treasurer && memberById(state.group.treasurer) ? `${esc(nameOf(state.group.treasurer))} recebe aluguel, água e luz` : "Ninguém definido — toque num integrante pra definir"}</div>
+          <div class="sub">${state.group.treasurer && memberById(state.group.treasurer) ? `${esc(nameOf(state.group.treasurer))} recebe aluguel, água e luz` : amAdmin() ? "Ninguém definido — toque num integrante pra definir" : "Ninguém definido — peça ao administrador"}</div>
         </div>
       </div>
       <div class="row"><div class="grow">Sair da sua conta neste aparelho</div><button class="btn btn-sm" data-action="logout">Sair</button></div>
@@ -1287,6 +1311,8 @@ function renderPeople() {
 function memberSheetHtml(m) {
   const isMe = m.id === state.mid;
   const isTreasurer = state.group?.treasurer === m.id;
+  const admin = amAdmin();
+  const tags = [isAdmin(m.id) ? "🛡️ administrador" : "", isTreasurer ? "💰 responsável pelas contas" : "", m.active === false ? "inativo" : "ativo"].filter(Boolean).join(" · ");
   return `
     <div class="sheet">
       <button class="close" data-action="dlg-close" aria-label="Fechar">✕</button>
@@ -1294,19 +1320,24 @@ function memberSheetHtml(m) {
         <span class="avatar big">${esc(initials(m.name))}</span>
         <div class="grow">
           <h2 style="margin:0">${esc(m.name)}${isMe ? ' <span class="muted small">(você)</span>' : ""}</h2>
-          <div class="small muted">${isTreasurer ? "💰 responsável pelas contas · " : ""}${m.active === false ? "inativo" : "ativo"}</div>
+          <div class="small muted">${tags}</div>
         </div>
       </div>
       ${pixLine(m.id)}
       <div class="btn-list mt">
         ${isMe ? `<button class="btn" data-action="member-pix">💠 ${m.pix ? "Editar minha chave Pix" : "Cadastrar minha chave Pix"}</button>` : ""}
-        <button class="btn" data-action="member-pin" data-id="${m.id}">🔑 ${isMe ? "Trocar meu PIN" : "Redefinir PIN (esqueceu)"}</button>
-        ${!isTreasurer && m.active !== false ? `<button class="btn" data-action="set-treasurer" data-id="${m.id}">💰 Tornar responsável pelas contas</button>` : ""}
+        ${isMe ? `<button class="btn" data-action="member-pin" data-id="${m.id}">🔑 Trocar meu PIN</button>` : ""}
+        ${!isMe && admin ? `<button class="btn" data-action="member-pin" data-id="${m.id}">🔑 Redefinir PIN (esqueceu)</button>` : ""}
+        ${admin && !isTreasurer && m.active !== false ? `<button class="btn" data-action="set-treasurer" data-id="${m.id}">💰 Tornar responsável pelas contas</button>` : ""}
+        ${admin && !isMe ? `<button class="btn" data-action="member-admin" data-id="${m.id}">🛡️ ${isAdmin(m.id) ? "Remover da administração" : "Tornar administrador"}</button>` : ""}
       </div>
+      ${admin ? `
       <div class="row mt">
-        <div class="grow">Participa das divisões${isMe ? ' <span class="muted small">(só outra pessoa pode te desativar)</span>' : ""}</div>
+        <div class="grow">Participa das divisões${isMe ? ' <span class="muted small">(só outro admin pode te desativar)</span>' : ""}</div>
         <label class="switch"><input type="checkbox" data-action="member-active" data-id="${m.id}" ${m.active !== false ? "checked" : ""} ${isMe ? "disabled" : ""}><i></i></label>
       </div>
+      ${!isMe ? `<div class="actions"><button class="btn btn-danger-ghost btn-block" data-action="member-delete" data-id="${m.id}">Excluir do grupo</button></div>` : ""}` : `
+      <p class="small muted mt mb0">Ativar/desativar, redefinir PIN e excluir integrantes: só o administrador.</p>`}
     </div>`;
 }
 
@@ -1490,6 +1521,7 @@ const actions = {
     input.value = n;
   },
   "pick-treasurer": () => {
+    if (!requireAdmin()) return;
     openDialog(`
       <div class="sheet">
         <button class="close" data-action="dlg-close" aria-label="Fechar">✕</button>
@@ -1514,7 +1546,33 @@ const actions = {
     }
   },
 
-  "member-new": () => openDialog(memberFormHtml({ mode: "new" })),
+  "member-new": () => { if (requireAdmin()) openDialog(memberFormHtml({ mode: "new" })); },
+  "member-delete": async (el) => {
+    if (!requireAdmin()) return;
+    const m = memberById(el.dataset.id);
+    if (!m) return;
+    if (m.id === state.mid) return toast("Você não pode excluir a si mesmo.");
+    if (state.group?.treasurer === m.id) return toast("Essa pessoa é a responsável pelas contas. Troque o responsável antes.", 3500);
+    const ok = await confirmDialog(`Excluir ${m.name} do grupo? A pessoa perde o acesso e sai das divisões. Contas e lançamentos antigos continuam registrados.`, "Excluir");
+    if (!ok) return;
+    closeDialog();
+    // guarda o nome pra o histórico não ficar com "?" e apaga o cadastro
+    write(() => updateDoc(groupRef(), { [`removedNames.${m.id}`]: m.name }));
+    write(() => deleteDoc(doc(col("members"), m.id)), `${m.name} excluído do grupo`);
+  },
+  "member-admin": async (el) => {
+    if (!requireAdmin()) return;
+    const m = memberById(el.dataset.id);
+    if (!m) return;
+    const makeAdmin = !isAdmin(m.id);
+    if (!makeAdmin && admins().filter((a) => a.id !== m.id).length === 0) return toast("O grupo precisa de pelo menos um administrador.", 3000);
+    const text = makeAdmin
+      ? `Tornar ${m.name} administrador? Vai poder excluir integrantes, redefinir PINs, definir o responsável e renomear o grupo.`
+      : `Remover ${m.name} da administração?`;
+    if (!(await confirmDialog(text, "Confirmar"))) return;
+    closeDialog();
+    write(() => updateDoc(doc(col("members"), m.id), { admin: makeAdmin }), makeAdmin ? `${m.name} agora é administrador` : `${m.name} não é mais administrador`);
+  },
   "member-open": (el) => {
     const m = memberById(el.dataset.id);
     if (m) openDialog(memberSheetHtml(m), { detail: null });
@@ -1522,6 +1580,7 @@ const actions = {
   "member-pin": (el) => {
     const m = memberById(el.dataset.id);
     if (!m) return;
+    if (m.id !== state.mid && !requireAdmin()) return;
     openDialog(memberFormHtml({ mode: m.id === state.mid ? "mypin" : "pin", member: m }));
   },
   "member-pix": () => openDialog(memberFormHtml({ mode: "pix", member: me() })),
@@ -1529,6 +1588,7 @@ const actions = {
     const m = memberById(el.dataset.id);
     if (!m) return;
     const active = el.checked;
+    if (!requireAdmin()) { el.checked = !active; return; }
     if (!active && m.id === state.mid) {
       el.checked = true;
       return toast("Você não pode se desativar. Peça pra outra pessoa.");
@@ -1540,6 +1600,7 @@ const actions = {
     write(() => updateDoc(doc(col("members"), m.id), { active }), active ? `${m.name} ativado` : `${m.name} desativado`);
   },
   "set-treasurer": async (el) => {
+    if (!requireAdmin()) return;
     const m = memberById(el.dataset.id);
     if (!m) return;
     if (!(await confirmDialog(`Tornar ${m.name} o responsável pelas contas? Toda conta nova virá com ${m.name} como quem recebe.`, "Confirmar"))) return;
@@ -1547,6 +1608,7 @@ const actions = {
     write(() => updateDoc(groupRef(), { treasurer: m.id }), `${m.name} agora é o responsável pelas contas`);
   },
   "group-rename": () => {
+    if (!requireAdmin()) return;
     openDialog(`
       <div class="sheet">
         <button class="close" data-action="dlg-close" aria-label="Fechar">✕</button>
@@ -1619,8 +1681,10 @@ const forms = {
       if (state.members.some((m) => m.name.localeCompare(name, "pt-BR", { sensitivity: "base" }) === 0)) {
         return showFormError(form, "Já existe alguém com esse nome.");
       }
+      if (mode === "new" && !requireAdmin()) return;
       const { mid, data } = await newMemberDoc(name, pin);
       data.pix = field(form, "pix").value.trim();
+      if (mode === "signup" && state.members.length === 0) data.admin = true; // quem cria o grupo é o admin
       if (!write(() => setDoc(doc(col("members"), mid), data), mode === "new" ? `${name} adicionado` : `Bem-vindo, ${name}!`)) return;
       closeDialog();
       if (mode === "signup") { state.mid = mid; state.loginPick = null; state.tab = "home"; saveSession(); render(); }
@@ -1633,6 +1697,7 @@ const forms = {
       return;
     }
     if (mode === "pin") {
+      if (!requireAdmin()) return;
       const hash = await pinHash(state.gid, form.dataset.id, pin);
       if (write(() => updateDoc(doc(col("members"), form.dataset.id), { pinHash: hash }), "PIN redefinido")) closeDialog();
     }
@@ -1680,6 +1745,7 @@ const forms = {
     toast(`Acerto com ${nameOf(pair.a === state.mid ? pair.b : pair.a)} registrado!`);
   },
   "group-rename": (form) => {
+    if (!requireAdmin()) return;
     const name = field(form, "name").value.trim();
     if (!name) return;
     if (write(() => updateDoc(groupRef(), { name }), "Grupo renomeado")) closeDialog();
