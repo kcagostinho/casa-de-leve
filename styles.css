@@ -430,3 +430,20 @@ textarea.msg {
   border-radius: 12px; background: var(--card-2); color: var(--text); resize: vertical; white-space: pre-wrap;
 }
 details.sub-items > summary .grow { line-height: 1.5; }
+
+/* ---------- v4: eventos ---------- */
+@media (max-width: 380px) { .tabbar button { font-size: 10px; } .tabbar button .ico { font-size: 20px; } }
+.participants { display: flex; flex-wrap: wrap; gap: 8px; }
+.pchip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border-radius: 999px;
+  background: var(--card-2); border: 1px solid var(--border); font-size: 14px; font-weight: 600;
+}
+.pchip.me { border-color: var(--accent); }
+.pchip .avatar { width: 26px; height: 26px; font-size: 12px; }
+.pchip .x { border: 0; background: none; color: var(--muted); font-size: 14px; cursor: pointer; padding: 0 2px; }
+.event-head h2 { font-size: 20px; }
+input[type="date"] {
+  width: 100%; font: inherit; font-size: 17px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--card-2); color: var(--text); min-height: 46px;
+}
+.row.tap { cursor: pointer; }

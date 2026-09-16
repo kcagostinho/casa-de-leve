@@ -5,6 +5,7 @@ App simples, feito pra celular, para um grupo de amigos que aluga um espaço:
 - **Início**: dashboard "quem deve pra quem" — por dupla, o valor em R$ das contas (já compensado) e os itens da geladeira devidos, com a chave Pix de quem recebe, o detalhamento do que compõe o valor, **Paguei tudo** (com comprovante opcional) e **Compartilhar resumo** pro WhatsApp.
 - **Contas** (aluguel, água, luz e extras) divididas por igual. Um **responsável fixo** recebe as contas do espaço; o app controla quem já transferiu a parte dele, com comprovante.
 - **Geladeira**: por item — "Pedro pegou 2× Heineken do Kaique" → Pedro fica devendo 2 Heineken; zera devolvendo/repondo. Sem dinheiro envolvido.
+- **Eventos**: churrasco, festa, viagem — despesas rateadas entre integrantes e **convidados de fora**. O convidado recebe um link só do evento e enxerga apenas ele (nunca aluguel, contas ou geladeira).
 - **Galera**: integrantes (nome + PIN de 4 dígitos + chave Pix), responsável pelas contas, link de convite.
 - Funciona como PWA (dá pra "instalar" na tela inicial), atualiza em tempo real para todo mundo e continua abrindo sem internet (sincroniza depois).
 
@@ -81,6 +82,13 @@ Qualquer outro host estático serve (Netlify, Cloudflare Pages, Vercel…): é s
 - PDF só até 600 KB (comprovantes de banco costumam ter 30–100 KB); maior que isso, tire um print.
 - Desmarcar um pagamento apaga o comprovante dele; excluir uma conta ou lançamento apaga os comprovantes ligados.
 
+### Eventos (com convidados)
+- Aba **Eventos → + Novo evento** (nome e data). Você já entra como participante; use **+ Integrante** para os do grupo e **+ Convidado** (nome, Pix opcional) para quem é de fora.
+- **🔗 Link pros convidados** copia/compartilha `…/#e=<id-do-evento>`. Quem abre escolhe o próprio nome na lista (sem PIN) e vê **só o evento**: despesas, sua parte, Pix de quem recebe, comprovantes. Não vê nada do grupo — o link do evento não contém o id do grupo.
+- Qualquer participante (convidado inclusive) pode lançar despesas ("Gelo R$ 40, pagou João, dividir entre todos"), marcar *Paguei/Recebi*, anexar comprovante e compartilhar o resumo do evento.
+- Dívidas de evento **entre integrantes** entram no dashboard do Início junto com as contas ("🍖 Churrasco · Picanha"); dívidas com convidados aparecem só dentro do evento.
+- Excluir o evento (admin do grupo ou quem criou) apaga despesas e comprovantes e derruba o acesso dos convidados.
+
 ### Administrador
 - Quem cria o grupo (o primeiro cadastrado) é o administrador (selo 🛡️ na Galera) e pode promover outros: Galera → nome → *Tornar administrador*.
 - Só admin pode: **excluir integrante**, ativar/desativar, redefinir o PIN de outra pessoa, definir o responsável pelas contas, adicionar integrante manualmente e renomear o grupo. Os demais editam só o próprio Pix e PIN.
@@ -112,6 +120,11 @@ groups/{gid}/bills/{bid}     { category, title, month "YYYY-MM", amount (centavo
 groups/{gid}/fridge/{fid}    { kind "pegou"|"devolveu", from, to, item, itemKey, qty, note, createdBy, createdAt }
                                (item "fluiu" de from para to: to passa a dever `qty` de `itemKey` a from)
 groups/{gid}/receipts/{rid}  { dataUrl, mime, bytes, name, uploadedBy, createdAt }
+groups/{gid}/events/{eid}    índice { name, date, createdAt }   (só para listar na aba Eventos)
+events/{eid}                 { name, date, createdAt, createdBy, participants: { pid: { name, member, pix } } }
+                               (SEM id do grupo: o link #e=<eid> não dá acesso ao grupo; integrante tem pid = mid)
+events/{eid}/expenses/{xid}  { title, amount, paidBy, splitAmong, shares {…}, notes, createdBy, createdAt }
+events/{eid}/receipts/{rid}  { dataUrl, mime, bytes, name, uploadedBy, createdAt }
 ```
 
 Valores das contas sempre em **centavos** (inteiros); a geladeira só tem quantidades. `pinHash` = SHA-256 de `gid:mid:pin`.

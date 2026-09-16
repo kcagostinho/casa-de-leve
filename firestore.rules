@@ -8,10 +8,20 @@ service cloud.firestore {
       allow list, delete: if false;
     }
 
-    // Subcoleções do grupo (members, bills, fridge, receipts): exatamente um nível abaixo.
+    // Subcoleções do grupo (members, bills, fridge, receipts, events = índice): exatamente um nível abaixo.
     // Não usar {document=**} aqui: o curinga recursivo casa também com o próprio /groups/{gid}
     // e liberaria list/delete do grupo.
     match /groups/{gid}/{collection}/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Eventos (churrasco etc.): coleção de topo, SEM referência ao grupo — o link do evento (#e=<eid>)
+    // dá acesso só ao evento, nunca às contas do grupo. Ninguém lista eventos.
+    match /events/{eid} {
+      allow get, create, update, delete: if request.auth != null;
+      allow list: if false;
+    }
+    match /events/{eid}/{collection}/{docId} {
       allow read, write: if request.auth != null;
     }
   }

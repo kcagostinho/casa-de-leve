@@ -57,6 +57,8 @@ export async function setDoc(ref, data) {
   store[ref.path] = clone(data);
   save(store);
 }
+const DELETE_FIELD = { __deleteField: true };
+export const deleteField = () => DELETE_FIELD;
 export async function updateDoc(ref, patch) {
   const store = load();
   if (!store[ref.path]) throw Object.assign(new Error("No document to update"), { code: "not-found" });
@@ -65,7 +67,8 @@ export async function updateDoc(ref, patch) {
     const parts = k.split(".");
     let o = d;
     for (const p of parts.slice(0, -1)) o = o[p] ??= {};
-    o[parts[parts.length - 1]] = clone(v);
+    if (v === DELETE_FIELD) delete o[parts[parts.length - 1]];
+    else o[parts[parts.length - 1]] = clone(v);
   }
   save(store);
 }
