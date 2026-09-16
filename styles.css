@@ -297,11 +297,19 @@ dialog {
   color: var(--text);
   border-radius: 18px;
   width: min(100%, 520px);
-  max-height: 92dvh;
+  max-height: calc(var(--vvh, 100dvh) - 16px);
+  overflow: hidden;
+  overscroll-behavior: contain;
   box-shadow: 0 20px 60px rgba(0, 0, 0, .35);
 }
 dialog::backdrop { background: rgba(0, 0, 0, .45); }
-dialog .sheet { padding: 18px 18px calc(18px + var(--safe-b)); overflow-y: auto; max-height: 92dvh; }
+dialog .sheet {
+  padding: 18px 18px calc(18px + var(--safe-b));
+  overflow-y: auto;
+  max-height: calc(var(--vvh, 100dvh) - 16px);
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
 dialog .sheet h2 { font-size: 19px; margin: 0 0 14px; padding-right: 36px; }
 dialog .close {
   position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border-radius: 50%; border: 0;
@@ -309,12 +317,16 @@ dialog .close {
 }
 @media (max-width: 600px) {
   dialog {
-    margin: auto 0 0;
+    /* folha colada embaixo; --vv-bottom sobe a folha quando o teclado do iPhone cobre a parte de baixo */
+    margin: auto 0 var(--vv-bottom, 0px);
     width: 100%;
     max-width: 100%;
     border-radius: 18px 18px 0 0;
   }
 }
+/* fundo travado enquanto um dialog está aberto (o <dialog> nativo não trava no celular) */
+html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: none; }
+html.modal-open body { position: fixed; left: 0; right: 0; top: var(--lock-top, 0px); width: 100%; }
 dialog.confirm { width: min(92%, 380px); margin: auto; border-radius: 18px; padding: 20px; }
 dialog.confirm p { font-size: 16px; margin-bottom: 4px; }
 

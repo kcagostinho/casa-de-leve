@@ -118,6 +118,7 @@ function confirmDialog(text, okLabel = "Confirmar") {
   $("#confirm-text").textContent = text;
   $('[data-action="confirm-yes"]', dlg).textContent = okLabel;
   dlg.showModal();
+  syncScrollLock();
   return new Promise((resolve) => {
     dlg._resolve = resolve;
   });
@@ -127,6 +128,7 @@ function settleConfirm(value) {
   const r = d._resolve;
   d._resolve = null;
   if (d.open) d.close();
+  syncScrollLock();
   r?.(value);
 }
 
@@ -1934,6 +1936,30 @@ function memberFormHtml({ mode, member }) {
 // ---------------------------------------------------------------- dialogs
 
 const dlg = () => $("#dlg");
+// --- rolagem do fundo: travada enquanto um dialog está aberto (no celular o <dialog> não trava sozinho)
+let lockedScrollY = 0;
+function syncScrollLock() {
+  const anyOpen = $("#dlg").open || $("#confirm").open;
+  const html = document.documentElement;
+  if (anyOpen && !html.classList.contains("modal-open")) {
+    lockedScrollY = window.scrollY;
+    html.style.setProperty("--lock-top", `-${lockedScrollY}px`);
+    html.classList.add("modal-open");
+  } else if (!anyOpen && html.classList.contains("modal-open")) {
+    html.classList.remove("modal-open");
+    window.scrollTo(0, lockedScrollY);
+  }
+}
+// altura visível de verdade (desconta o teclado no iPhone) → --vvh / --vv-bottom usados pelos dialogs
+function updateViewportVars() {
+  const vv = window.visualViewport;
+  const h = vv ? vv.height : window.innerHeight;
+  const bottom = vv ? Math.max(0, window.innerHeight - (vv.height + vv.offsetTop)) : 0;
+  const html = document.documentElement;
+  html.style.setProperty("--vvh", `${Math.round(h)}px`);
+  html.style.setProperty("--vv-bottom", `${Math.round(bottom)}px`);
+}
+
 function openDialog(html, { detail = null } = {}) {
   state.openDetail = detail; // só o detalhe da conta é re-renderizado ao vivo
   state.pendingReceipt = null;
@@ -1941,6 +1967,9 @@ function openDialog(html, { detail = null } = {}) {
   d.innerHTML = html;
   if (!d.open) d.showModal();
   d.scrollTop = 0;
+  const sheet = $(".sheet", d);
+  if (sheet) sheet.scrollTop = 0;
+  syncScrollLock();
 }
 function closeDialog() {
   state.openDetail = null;
@@ -1948,6 +1977,7 @@ function closeDialog() {
   const d = dlg();
   if (d.open) d.close();
   d.innerHTML = "";
+  syncScrollLock(); // não depender só do evento "close" (pode atrasar em aba em segundo plano)
 }
 function showFormError(form, msg) {
   const el = $("[data-error]", form);
@@ -2471,8 +2501,16 @@ document.addEventListener("toggle", (e) => {
 $("#dlg").addEventListener("click", (e) => {
   if (e.target === e.currentTarget) closeDialog();
 });
-$("#dlg").addEventListener("close", () => { state.openDetail = null; });
-$("#confirm").addEventListener("close", () => settleConfirm(false));
+$("#dlg").addEventListener("close", () => { state.openDetail = null; syncScrollLock(); });
+$("#confirm").addEventListener("close", () => { settleConfirm(false); syncScrollLock(); });
+
+// teclado/visual viewport
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", updateViewportVars);
+  window.visualViewport.addEventListener("scroll", updateViewportVars);
+}
+window.addEventListener("resize", updateViewportVars);
+updateViewportVars();
 
 // online / offline
 const offline = $("#offline");
