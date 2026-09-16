@@ -1,12 +1,11 @@
-// Cole aqui o objeto firebaseConfig do console do Firebase:
-// Configurações do projeto → Seus apps → Web (</>) → "SDK setup and configuration" → Config
+// Configuração do projeto Firebase "casa-de-leve".
 // Esses valores NÃO são segredo: a proteção dos dados vem das regras do Firestore (firestore.rules)
 // e do link do grupo, que só quem foi convidado tem.
 export const firebaseConfig = {
-  apiKey: "COLE_AQUI",
-  authDomain: "COLE_AQUI.firebaseapp.com",
-  projectId: "COLE_AQUI",
-  storageBucket: "COLE_AQUI.appspot.com",
-  messagingSenderId: "COLE_AQUI",
-  appId: "COLE_AQUI",
+  apiKey: "AIzaSyCNzvLb9r1BVDvHUD0_6-eLaG1UNbD7Kms",
+  authDomain: "casa-de-leve.firebaseapp.com",
+  projectId: "casa-de-leve",
+  storageBucket: "casa-de-leve.firebasestorage.app",
+  messagingSenderId: "790272733932",
+  appId: "1:790272733932:web:f66b8c33124743f968ebc9",
 };

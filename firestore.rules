@@ -1,15 +1,18 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Só quem tem o id do grupo (o link de convite) chega até aqui.
-    // A coleção "groups" não pode ser listada, então não dá pra descobrir ids.
+    // O documento do grupo: quem tem o id (o link de convite) lê e edita; ninguém lista nem apaga.
+    // (Sem listagem, não dá pra descobrir ids de grupos.)
     match /groups/{gid} {
       allow get, create, update: if request.auth != null;
       allow list, delete: if false;
+    }
 
-      match /{document=**} {
-        allow read, write: if request.auth != null;
-      }
+    // Subcoleções do grupo (members, bills, fridge, receipts): exatamente um nível abaixo.
+    // Não usar {document=**} aqui: o curinga recursivo casa também com o próprio /groups/{gid}
+    // e liberaria list/delete do grupo.
+    match /groups/{gid}/{collection}/{docId} {
+      allow read, write: if request.auth != null;
     }
   }
 }
